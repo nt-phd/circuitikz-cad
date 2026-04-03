@@ -36,16 +36,24 @@ async function renderLatex(latexBody) {
     const texFile = join(dir, 'circuit.tex');
     await writeFile(texFile, LATEX_WRAPPER(latexBody), 'utf8');
 
-    // Compile to DVI (faster than PDF for dvisvgm)
-    await run('latex', ['-interaction=nonstopmode', '-halt-on-error', 'circuit.tex'], dir);
+    // pdflatex → PDF
+    await run('pdflatex', ['-interaction=nonstopmode', '-halt-on-error', 'circuit.tex'], dir);
 
-    // Convert DVI → SVG
-    await run('dvisvgm', ['--no-fonts', '--exact', '--bbox=tight', 'circuit.dvi', '-o', 'circuit.svg'], dir);
+    // PDF → SVG (page 1)
+    await run('pdf2svg', ['circuit.pdf', 'circuit.svg', '1'], dir);
 
     const svg = await readFile(join(dir, 'circuit.svg'), 'utf8');
     return { svg };
   } catch (err) {
-    return { error: err.message };
+    // Include last lines of .log for useful diagnostics
+    let detail = err.message;
+    try {
+      const log = await readFile(join(dir, 'circuit.log'), 'utf8');
+      const lines = log.split('\n');
+      const errorLines = lines.filter(l => l.startsWith('!') || l.includes('Error'));
+      detail = errorLines.slice(0, 6).join('\n') || log.slice(-800);
+    } catch {}
+    return { error: detail };
   } finally {
     await rm(dir, { recursive: true, force: true });
   }

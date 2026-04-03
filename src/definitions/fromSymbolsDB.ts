@@ -6,6 +6,9 @@ import type { ComponentDef, PlacementType } from '../types';
 import type { ComponentRegistry } from './ComponentRegistry';
 import type { SymbolsDB } from '../data/symbolsDB';
 
+// Internal CircuiTikZ shape aliases that are not valid \draw to[...] commands
+const INVALID_TIKZ_NAMES = new Set(['generic', 'xgeneric', 'sgeneric', 'tgeneric', 'ageneric']);
+
 // Map symbolsDB group names → our category names
 const GROUP_TO_CATEGORY: Record<string, ComponentDef['category']> = {
   'Resistive bipoles':              'passive',
@@ -33,6 +36,7 @@ export function populateRegistryFromSymbolsDB(
   for (const entry of db.getAllComponents()) {
     const v = entry.defaultVariant;
     if (!v.symbolId) continue;
+    if (INVALID_TIKZ_NAMES.has(entry.tikz)) continue;
 
     // Determine START and END pins for bipoles
     const startPin = v.pins.find(p => p.name === 'START');
