@@ -173,7 +173,7 @@ export class LatexCanvas {
       }
     } catch (e) {
       console.warn('[LatexCanvas] server unreachable:', e);
-      this.showError('Render server unreachable');
+      this.showError('Render server unreachable. Start it with: npm run dev:render');
     } finally {
       this.renderInFlight = false;
       if (this.renderPending) this.doRender();

@@ -151,7 +151,8 @@ export type AppEvent =
   /** Fired by CodePanel after debounce when the user finishes editing LaTeX manually. */
   | { type: 'user-edited-latex' }
   /** Fired by CodePanel when the caret moves to another source line. */
-  | { type: 'code-caret-changed'; lineIndex: number };
+  | { type: 'code-caret-changed'; lineIndex: number }
+  | { type: 'cursor-grid-changed'; gridPt: GridPoint; zoomPercent: number };
 
 // ============================================================
 // VIEW
