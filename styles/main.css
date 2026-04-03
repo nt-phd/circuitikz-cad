@@ -1,0 +1,349 @@
+/* ======================================
+   CircuiTikZ CAD - Layout & Styles
+   ====================================== */
+
+*, *::before, *::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html, body {
+  height: 100%;
+  overflow: hidden;
+  font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+  font-size: 13px;
+  color: #222;
+  background: #f5f5f5;
+}
+
+#app {
+  display: grid;
+  grid-template-columns: 180px 1fr 220px;
+  grid-template-rows: 42px 1fr 180px 24px;
+  grid-template-areas:
+    "toolbar  toolbar  toolbar"
+    "palette  canvas   props"
+    "palette  code     props"
+    "status   status   status";
+  height: 100vh;
+  width: 100vw;
+}
+
+/* ====== TOOLBAR ====== */
+.toolbar {
+  grid-area: toolbar;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 8px;
+  background: #fff;
+  border-bottom: 1px solid #ddd;
+  user-select: none;
+}
+
+.toolbar button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 30px;
+  min-width: 60px;
+  padding: 0 10px;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  background: #fafafa;
+  cursor: pointer;
+  font-size: 12px;
+  font-family: inherit;
+  transition: background 0.15s, border-color 0.15s;
+}
+
+.toolbar button:hover {
+  background: #e8e8e8;
+}
+
+.toolbar button.active {
+  background: #2196F3;
+  color: white;
+  border-color: #1976D2;
+}
+
+.toolbar .separator {
+  width: 1px;
+  height: 24px;
+  background: #ddd;
+  margin: 0 6px;
+}
+
+.toolbar .style-toggle {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+  font-size: 12px;
+}
+
+.toolbar .style-toggle button {
+  min-width: 36px;
+  padding: 0 8px;
+}
+
+/* ====== PALETTE ====== */
+.palette {
+  grid-area: palette;
+  background: #fff;
+  border-right: 1px solid #ddd;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  user-select: none;
+}
+
+.palette-search {
+  flex-shrink: 0;
+  margin: 6px 8px;
+  padding: 4px 8px;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  font-size: 12px;
+  font-family: inherit;
+  outline: none;
+  width: calc(100% - 16px);
+  box-sizing: border-box;
+}
+
+.palette-search:focus {
+  border-color: #2196F3;
+}
+
+.palette-list {
+  flex: 1;
+  overflow-y: auto;
+}
+
+.palette .category-title {
+  padding: 8px 10px 4px;
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  color: #888;
+  letter-spacing: 0.5px;
+}
+
+.palette .comp-btn {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  padding: 6px 10px;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  font-size: 12px;
+  font-family: inherit;
+  text-align: left;
+  transition: background 0.1s;
+}
+
+.palette .comp-btn:hover {
+  background: #f0f0f0;
+}
+
+.palette .comp-btn.active {
+  background: #e3f2fd;
+  color: #1565C0;
+  font-weight: 500;
+}
+
+.palette .comp-btn .comp-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.palette .comp-btn .shortcut {
+  margin-left: auto;
+  font-size: 10px;
+  color: #aaa;
+  padding: 1px 5px;
+  background: #f0f0f0;
+  border-radius: 3px;
+}
+
+/* ====== CANVAS ====== */
+.canvas-container {
+  grid-area: canvas;
+  overflow: hidden;
+  position: relative;
+  background: #fff;
+}
+
+.canvas-container svg {
+  display: block;
+}
+
+/* ====== PROPERTY PANEL ====== */
+.props {
+  grid-area: props;
+  background: #fff;
+  border-left: 1px solid #ddd;
+  overflow-y: auto;
+  padding: 10px;
+  user-select: none;
+}
+
+.props h3 {
+  font-size: 12px;
+  font-weight: 600;
+  margin-bottom: 10px;
+  color: #555;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.props .prop-group {
+  margin-bottom: 10px;
+}
+
+.props label {
+  display: block;
+  font-size: 11px;
+  color: #777;
+  margin-bottom: 3px;
+}
+
+.props input[type="text"] {
+  width: 100%;
+  padding: 5px 8px;
+  border: 1px solid #ddd;
+  border-radius: 3px;
+  font-size: 12px;
+  font-family: 'Consolas', 'Monaco', monospace;
+}
+
+.props input[type="text"]:focus {
+  outline: none;
+  border-color: #2196F3;
+}
+
+.props select {
+  width: 100%;
+  padding: 5px 8px;
+  border: 1px solid #ddd;
+  border-radius: 3px;
+  font-size: 12px;
+  background: white;
+}
+
+.props .rotation-btns {
+  display: flex;
+  gap: 4px;
+}
+
+.props .rotation-btns button {
+  flex: 1;
+  padding: 4px;
+  border: 1px solid #ddd;
+  border-radius: 3px;
+  background: #fafafa;
+  cursor: pointer;
+  font-size: 11px;
+}
+
+.props .rotation-btns button:hover {
+  background: #e8e8e8;
+}
+
+.props .empty-hint {
+  color: #aaa;
+  font-size: 12px;
+  font-style: italic;
+  text-align: center;
+  margin-top: 40px;
+}
+
+/* ====== CODE PANEL ====== */
+.code-panel {
+  grid-area: code;
+  background: #1e1e1e;
+  color: #d4d4d4;
+  overflow: auto;
+  position: relative;
+  border-top: 1px solid #ddd;
+}
+
+.code-panel .code-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 4px 10px;
+  background: #252526;
+  border-bottom: 1px solid #333;
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+
+.code-panel .code-header span {
+  font-size: 11px;
+  color: #999;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.code-panel .copy-btn {
+  padding: 2px 10px;
+  border: 1px solid #555;
+  border-radius: 3px;
+  background: #333;
+  color: #ccc;
+  cursor: pointer;
+  font-size: 11px;
+}
+
+.code-panel .copy-btn:hover {
+  background: #444;
+}
+
+.code-panel pre {
+  margin: 0;
+  padding: 10px;
+  font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre;
+  tab-size: 2;
+}
+
+/* ====== STATUS BAR ====== */
+.status-bar {
+  grid-area: status;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 0 10px;
+  background: #007ACC;
+  color: white;
+  font-size: 11px;
+  user-select: none;
+}
+
+.status-bar .coord {
+  font-family: 'Consolas', monospace;
+}
+
+/* ====== SCROLLBAR ====== */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: #ccc;
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #aaa;
+}

@@ -1,0 +1,15 @@
+export const GRID_SIZE = 20;
+export const SNAP_GRID = 1;
+export const MIN_ZOOM = 0.1;
+export const MAX_ZOOM = 5.0;
+export const ZOOM_STEP = 1.1;
+export const MAJOR_GRID_EVERY = 5;
+export const GRID_COLOR_MINOR = '#e0e0e0';
+export const GRID_COLOR_MAJOR = '#b0b0b0';
+export const WIRE_COLOR = '#000000';
+export const WIRE_WIDTH = 2;
+export const COMPONENT_COLOR = '#000000';
+export const COMPONENT_STROKE_WIDTH = 2;
+export const SELECTION_COLOR = '#2196F3';
+export const GHOST_OPACITY = 0.4;
+export const DEFAULT_STYLE: 'european' | 'american' = 'european';
