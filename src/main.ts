@@ -5,7 +5,7 @@ import { CircuitDocument } from './model/CircuitDocument';
 import { SelectionState } from './model/SelectionState';
 import { EventBus } from './utils/events';
 import { registry } from './definitions/ComponentRegistry';
-import { SvgCanvas } from './canvas/SvgCanvas';
+import { LatexCanvas } from './canvas/LatexCanvas';
 import { ToolManager } from './tools/ToolManager';
 import { CircuiTikZEmitter } from './codegen/CircuiTikZEmitter';
 import { Toolbar } from './ui/Toolbar';
@@ -16,78 +16,48 @@ import { StatusBar } from './ui/StatusBar';
 import type { ToolContext } from './tools/BaseTool';
 
 async function init() {
-  // Load CircuiTikZ symbols SVG into DOM and populate registry
   await symbolsDB.load('/src/data/symbols.svg');
   populateRegistryFromSymbolsDB(registry, symbolsDB);
 
-  // 1. Create model
   const doc = new CircuitDocument('european');
   const selection = new SelectionState();
   const eventBus = new EventBus();
 
-  // 2. Create canvas
   const canvasContainer = document.getElementById('canvas-container')!;
-  const svgCanvas = new SvgCanvas(canvasContainer, doc, registry, selection);
+  const canvas = new LatexCanvas(canvasContainer, doc, registry, selection);
 
-  // 3. Create tool context
+  const emitter = new CircuiTikZEmitter(registry);
+  canvas.setLatexCallback(() => emitter.emit(doc));
+
   const toolCtx: ToolContext = {
-    renderer: svgCanvas.renderer,
+    ghost: canvas.ghost,
+    hitTester: canvas.hitTester,
     emit: (e) => eventBus.emit(e),
     getDocument: () => doc,
   };
 
-  // 4. Create tool manager
-  const toolManager = new ToolManager(toolCtx, svgCanvas, selection, (e) => eventBus.emit(e));
+  const toolManager = new ToolManager(toolCtx, canvas, selection, (e) => eventBus.emit(e));
 
-  // 5. Create UI panels
-  new Toolbar(
-    document.getElementById('toolbar')!,
-    toolManager,
-    eventBus,
-    doc,
-  );
+  new Toolbar(document.getElementById('toolbar')!, toolManager, eventBus, doc);
 
-  new ComponentPalette(
-    document.getElementById('palette')!,
-    registry,
-    toolManager,
-    eventBus,
-  );
+  new ComponentPalette(document.getElementById('palette')!, registry, toolManager, eventBus);
 
-  new PropertyPanel(
-    document.getElementById('props')!,
-    doc,
-    selection,
-    eventBus,
-    registry,
-  );
+  new PropertyPanel(document.getElementById('props')!, doc, selection, eventBus, registry);
 
-  const emitter = new CircuiTikZEmitter(registry);
-  new CodePanel(
-    document.getElementById('code-panel')!,
-    emitter,
-    doc,
-    eventBus,
-  );
+  new CodePanel(document.getElementById('code-panel')!, emitter, doc, eventBus);
 
-  const statusBar = new StatusBar(
-    document.getElementById('status-bar')!,
-    svgCanvas.view,
-    toolManager,
-    eventBus,
-  );
+  const statusBar = new StatusBar(document.getElementById('status-bar')!, canvas.view, toolManager, eventBus);
 
-  // 6. Wire up global re-render on document changes
-  eventBus.on('document-changed', () => svgCanvas.refresh());
-
-  // 7. Mouse move for status bar
-  svgCanvas.svgRoot.addEventListener('mousemove', (e) => {
-    const gridPt = svgCanvas.eventToGrid(e);
-    statusBar.updateCoords(gridPt);
+  eventBus.on('document-changed', () => {
+    canvas.refresh();
+    canvas.scheduleRender();
   });
 
-  // 8. Window resize handler
-  window.addEventListener('resize', () => svgCanvas.refresh());
+  canvas.overlaySvg.addEventListener('mousemove', (e) => {
+    statusBar.updateCoords(canvas.eventToGridRaw(e));
+  });
+
+  window.addEventListener('resize', () => canvas.refresh());
 }
 
 init().catch(console.error);

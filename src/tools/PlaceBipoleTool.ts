@@ -21,7 +21,7 @@ export class PlaceBipoleTool extends BaseTool {
     if (e.button !== 0) {
       // Right-click: cancel current placement
       this.startPoint = null;
-      this.ctx.renderer.setGhostElement(null);
+      this.ctx.ghost.setGhostElement(null);
       return;
     }
 
@@ -49,18 +49,18 @@ export class PlaceBipoleTool extends BaseTool {
 
       // Reset for next placement (sticky!)
       this.startPoint = null;
-      this.ctx.renderer.setGhostElement(null);
+      this.ctx.ghost.setGhostElement(null);
     }
   }
 
   onMouseMove(gridPt: GridPoint, _e: MouseEvent): void {
     if (this.startPoint) {
       if (pointsEqual(this.startPoint, gridPt)) {
-        this.ctx.renderer.setGhostElement(null);
+        this.ctx.ghost.setGhostElement(null);
         return;
       }
-      const ghost = this.ctx.renderer.buildBipoleGhost(this.defId, this.startPoint, gridPt);
-      this.ctx.renderer.setGhostElement(ghost);
+      const ghost = this.ctx.ghost.buildBipoleGhost(this.defId, this.startPoint, gridPt);
+      this.ctx.ghost.setGhostElement(ghost);
     }
   }
 

@@ -5,7 +5,7 @@ import { PlaceBipoleTool } from './PlaceBipoleTool';
 import { PlaceMonopoleTool } from './PlaceMonopoleTool';
 import { WireTool } from './WireTool';
 import { DeleteTool } from './DeleteTool';
-import type { SvgCanvas } from '../canvas/SvgCanvas';
+import type { LatexCanvas } from '../canvas/LatexCanvas';
 import type { SelectionState } from '../model/SelectionState';
 
 export class ToolManager {
@@ -15,12 +15,12 @@ export class ToolManager {
 
   constructor(
     private ctx: ToolContext,
-    private svgCanvas: SvgCanvas,
+    private canvas: LatexCanvas,
     private selection: SelectionState,
     private emitEvent: (event: AppEvent) => void,
   ) {
     this.currentTool = new SelectTool(ctx, selection);
-    this.attachCanvasListeners();
+    this.attachListeners();
   }
 
   get currentType(): ToolType { return this._currentType; }
@@ -31,26 +31,27 @@ export class ToolManager {
     this._currentType = type;
     this._currentDefId = defId;
 
+    const overlay = this.canvas.overlaySvg;
     switch (type) {
       case 'select':
         this.currentTool = new SelectTool(this.ctx, this.selection);
-        this.svgCanvas.svgRoot.style.cursor = 'default';
+        overlay.style.cursor = 'default';
         break;
       case 'place-bipole':
         this.currentTool = new PlaceBipoleTool(this.ctx, defId!);
-        this.svgCanvas.svgRoot.style.cursor = 'crosshair';
+        overlay.style.cursor = 'crosshair';
         break;
       case 'place-monopole':
         this.currentTool = new PlaceMonopoleTool(this.ctx, defId!);
-        this.svgCanvas.svgRoot.style.cursor = 'crosshair';
+        overlay.style.cursor = 'crosshair';
         break;
       case 'wire':
         this.currentTool = new WireTool(this.ctx);
-        this.svgCanvas.svgRoot.style.cursor = 'crosshair';
+        overlay.style.cursor = 'crosshair';
         break;
       case 'delete':
         this.currentTool = new DeleteTool(this.ctx);
-        this.svgCanvas.svgRoot.style.cursor = 'not-allowed';
+        overlay.style.cursor = 'not-allowed';
         break;
     }
 
@@ -58,48 +59,38 @@ export class ToolManager {
     this.emitEvent({ type: 'tool-changed', tool: type, defId });
   }
 
-  private attachCanvasListeners(): void {
-    const svg = this.svgCanvas.svgRoot;
+  private attachListeners(): void {
+    const el = this.canvas.overlaySvg;
 
-    svg.addEventListener('mousedown', (e: MouseEvent) => {
-      // Don't intercept pan (middle click, space+click)
+    el.addEventListener('mousedown', (e: MouseEvent) => {
       if (e.button === 1) return;
-      if (this.svgCanvas.panZoom.isCurrentlyPanning) return;
-
-      const gridPt = this.svgCanvas.eventToGrid(e);
-      this.currentTool.onMouseDown(gridPt, e);
+      if (this.canvas.isCurrentlyPanning) return;
+      this.currentTool.onMouseDown(this.canvas.eventToGrid(e), e);
     });
 
-    svg.addEventListener('mousemove', (e: MouseEvent) => {
-      if (this.svgCanvas.panZoom.isCurrentlyPanning) return;
-      const gridPt = this.svgCanvas.eventToGrid(e);
-      this.currentTool.onMouseMove(gridPt, e);
+    el.addEventListener('mousemove', (e: MouseEvent) => {
+      if (this.canvas.isCurrentlyPanning) return;
+      this.currentTool.onMouseMove(this.canvas.eventToGrid(e), e);
     });
 
-    svg.addEventListener('mouseup', (e: MouseEvent) => {
-      if (this.svgCanvas.panZoom.isCurrentlyPanning) return;
-      const gridPt = this.svgCanvas.eventToGrid(e);
-      this.currentTool.onMouseUp(gridPt, e);
+    el.addEventListener('mouseup', (e: MouseEvent) => {
+      if (this.canvas.isCurrentlyPanning) return;
+      this.currentTool.onMouseUp(this.canvas.eventToGrid(e), e);
     });
 
-    svg.addEventListener('dblclick', (e: MouseEvent) => {
+    el.addEventListener('dblclick', (_e: MouseEvent) => {
       if (this.currentTool instanceof WireTool) {
         (this.currentTool as WireTool).finishWire();
       }
     });
 
     window.addEventListener('keydown', (e: KeyboardEvent) => {
-      // Don't capture if focus is on an input
-      if ((e.target as HTMLElement).tagName === 'INPUT' || (e.target as HTMLElement).tagName === 'SELECT') return;
-
+      if ((e.target as HTMLElement).tagName === 'INPUT' ||
+          (e.target as HTMLElement).tagName === 'SELECT') return;
       this.currentTool.onKeyDown(e);
-
-      if (e.key === 'Escape') {
-        this.setTool('select');
-      }
+      if (e.key === 'Escape') this.setTool('select');
     });
 
-    // Prevent context menu on canvas
-    svg.addEventListener('contextmenu', (e) => e.preventDefault());
+    el.addEventListener('contextmenu', (e) => e.preventDefault());
   }
 }

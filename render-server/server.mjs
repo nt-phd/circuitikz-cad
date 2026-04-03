@@ -43,7 +43,15 @@ async function renderLatex(latexBody) {
     await run('pdf2svg', ['circuit.pdf', 'circuit.svg', '1'], dir);
 
     const svg = await readFile(join(dir, 'circuit.svg'), 'utf8');
-    return { svg };
+
+    // Extract the transform matrix common to all path elements.
+    // pdf2svg always emits: transform="matrix(1, 0, 0, -1, tx, ty)"
+    // where (tx, ty) is the SVG position of the TikZ origin (0,0).
+    const m = svg.match(/transform="matrix\(1,\s*0,\s*0,\s*-1,\s*([\d.+-]+),\s*([\d.+-]+)\)"/);
+    const tx = m ? parseFloat(m[1]) : 0;
+    const ty = m ? parseFloat(m[2]) : 0;
+
+    return { svg, tx, ty };
   } catch (err) {
     // Include last lines of .log for useful diagnostics
     let detail = err.message;

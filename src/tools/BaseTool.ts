@@ -1,8 +1,10 @@
 import type { GridPoint } from '../types';
-import type { Renderer } from '../canvas/Renderer';
+import type { GhostRenderer } from '../canvas/GhostRenderer';
+import type { HitTester } from '../canvas/HitTester';
 
 export interface ToolContext {
-  renderer: Renderer;
+  ghost: GhostRenderer;
+  hitTester: HitTester;
   emit: (event: import('../types').AppEvent) => void;
   getDocument: () => import('../model/CircuitDocument').CircuitDocument;
 }
@@ -15,10 +17,6 @@ export abstract class BaseTool {
   abstract onMouseUp(gridPt: GridPoint, e: MouseEvent): void;
 
   onKeyDown(_e: KeyboardEvent): void {}
-
   activate(): void {}
-
-  deactivate(): void {
-    this.ctx.renderer.setGhostElement(null);
-  }
+  deactivate(): void { this.ctx.ghost.setGhostElement(null); }
 }

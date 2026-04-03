@@ -1,4 +1,8 @@
 export const GRID_SIZE = 20;
+// 1 TikZ unit = 1cm = 28.3465 pt (as used by pdf2svg coordinate system)
+export const TIKZ_PT_PER_UNIT = 28.3465;
+export const RENDER_SERVER_URL = 'http://127.0.0.1:3737';
+export const RENDER_DEBOUNCE_MS = 600;
 export const SNAP_GRID = 1;
 export const MIN_ZOOM = 0.1;
 export const MAX_ZOOM = 5.0;

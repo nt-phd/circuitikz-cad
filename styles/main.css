@@ -178,8 +178,36 @@ html, body {
   background: #fff;
 }
 
-.canvas-container svg {
+/* World transform div: both layers share the same CSS transform */
+.world-transform {
+  position: absolute;
+  top: 0;
+  left: 0;
+  transform-origin: 0 0;
+  will-change: transform;
+}
+
+/* LaTeX SVG layer: pointer-events none so clicks reach overlay */
+.latex-layer {
+  position: absolute;
+  top: 0;
+  left: 0;
+  pointer-events: none;
+}
+
+.latex-layer svg {
   display: block;
+  overflow: visible;
+}
+
+/* Overlay SVG: grid + ghost + selection, covers whole canvas */
+.overlay-layer {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
 }
 
 /* ====== PROPERTY PANEL ====== */
@@ -270,49 +298,27 @@ html, body {
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  border-top: 1px solid #ddd;
+  border-top: 1px solid #333;
 }
 
-.code-panel .code-tabbar {
+.code-panel .code-header {
   display: flex;
   align-items: center;
-  gap: 2px;
-  padding: 0 6px;
+  justify-content: space-between;
+  padding: 4px 10px;
   background: #252526;
   border-bottom: 1px solid #333;
   flex-shrink: 0;
 }
 
-.code-panel .code-tab {
-  padding: 5px 12px;
-  border: none;
-  background: transparent;
+.code-panel .code-header span {
+  font-size: 11px;
   color: #999;
-  cursor: pointer;
-  font-size: 11px;
-  font-family: inherit;
-  border-bottom: 2px solid transparent;
-  margin-bottom: -1px;
-}
-
-.code-panel .code-tab.active {
-  color: #d4d4d4;
-  border-bottom-color: #2196F3;
-}
-
-.code-panel .code-tab:hover:not(.active) {
-  color: #ccc;
-  background: #2a2a2a;
-}
-
-.code-panel .render-status {
-  margin-left: 6px;
-  font-size: 11px;
-  color: #aaa;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
 }
 
 .code-panel .copy-btn {
-  margin-left: auto;
   padding: 2px 10px;
   border: 1px solid #555;
   border-radius: 3px;
@@ -322,66 +328,18 @@ html, body {
   font-size: 11px;
 }
 
-.code-panel .copy-btn:hover {
-  background: #444;
-}
-
-.code-panel .code-pane {
-  display: none;
-  flex: 1;
-  overflow: auto;
-}
-
-.code-panel .code-pane.active {
-  display: block;
-}
+.code-panel .copy-btn:hover { background: #444; }
 
 .code-panel pre {
+  flex: 1;
   margin: 0;
   padding: 10px;
+  overflow: auto;
   font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
   font-size: 12px;
   line-height: 1.5;
   white-space: pre;
   tab-size: 2;
-}
-
-.code-panel .preview-pane {
-  background: #fff;
-  padding: 16px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.code-panel .preview-pane svg {
-  max-width: 100%;
-  height: auto;
-}
-
-.code-panel .render-hint {
-  color: #888;
-  font-size: 12px;
-  text-align: center;
-  font-family: inherit;
-}
-
-.code-panel .render-hint code {
-  background: #f0f0f0;
-  padding: 1px 5px;
-  border-radius: 3px;
-  font-size: 11px;
-}
-
-.code-panel .render-error {
-  color: #f44336;
-  font-size: 11px;
-  font-family: 'Consolas', monospace;
-  white-space: pre-wrap;
-  max-height: 100%;
-  overflow: auto;
-  margin: 0;
-  padding: 8px;
 }
 
 /* ====== STATUS BAR ====== */

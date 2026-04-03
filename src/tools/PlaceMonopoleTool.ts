@@ -14,7 +14,7 @@ export class PlaceMonopoleTool extends BaseTool {
 
   onMouseDown(gridPt: GridPoint, e: MouseEvent): void {
     if (e.button !== 0) {
-      this.ctx.renderer.setGhostElement(null);
+      this.ctx.ghost.setGhostElement(null);
       return;
     }
 
@@ -34,8 +34,8 @@ export class PlaceMonopoleTool extends BaseTool {
   }
 
   onMouseMove(gridPt: GridPoint, _e: MouseEvent): void {
-    const ghost = this.ctx.renderer.buildMonopoleGhost(this.defId, gridPt, this.rotation);
-    this.ctx.renderer.setGhostElement(ghost);
+    const ghost = this.ctx.ghost.buildMonopoleGhost(this.defId, gridPt, this.rotation);
+    this.ctx.ghost.setGhostElement(ghost);
   }
 
   onMouseUp(_gridPt: GridPoint, _e: MouseEvent): void {}
