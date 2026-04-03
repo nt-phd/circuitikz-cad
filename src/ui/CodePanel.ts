@@ -1,22 +1,30 @@
-import type { CircuiTikZEmitter } from '../codegen/CircuiTikZEmitter';
-import type { CircuitDocument } from '../model/CircuitDocument';
-import type { ComponentRegistry } from '../definitions/ComponentRegistry';
-import type { EventBus } from '../utils/events';
-import { parseCircuiTikZ } from '../codegen/CircuiTikZParser';
+/**
+ * CodePanel — bidirectional LaTeX editor.
+ *
+ * Two sections:
+ *   [Preamble]  collapsible textarea — packages, ctikzset, etc.
+ *   [Body]      always-visible textarea — the TikZ/LaTeX content
+ *
+ * Flow:
+ *   canvas tool action → emitter → doc.body updated → body textarea updated
+ *   user edits textarea → latexDoc updated → 'latex-changed' event → canvas re-renders
+ */
 
-const PARSE_DEBOUNCE_MS = 800;
+import type { LatexDocument } from '../model/LatexDocument';
+import type { EventBus } from '../utils/events';
+
+const RENDER_DEBOUNCE_MS = 800;
 
 export class CodePanel {
-  private textarea: HTMLTextAreaElement;
-  private parseTimer: ReturnType<typeof setTimeout> | null = null;
-  /** Prevent re-entrant updates: true while we are updating the textarea from canvas */
-  private updatingFromCanvas = false;
+  private preambleArea: HTMLTextAreaElement;
+  private bodyArea: HTMLTextAreaElement;
+  private renderTimer: ReturnType<typeof setTimeout> | null = null;
+  /** True while we're updating the textareas programmatically from a model change */
+  private updatingFromModel = false;
 
   constructor(
     parent: HTMLElement,
-    private emitter: CircuiTikZEmitter,
-    private doc: CircuitDocument,
-    private registry: ComponentRegistry,
+    private latexDoc: LatexDocument,
     private eventBus: EventBus,
   ) {
     // ── Header ──────────────────────────────────────────────────────────
@@ -24,81 +32,112 @@ export class CodePanel {
     header.className = 'code-header';
 
     const title = document.createElement('span');
-    title.textContent = 'CircuiTikZ';
+    title.textContent = 'LaTeX';
     header.appendChild(title);
 
     const copyBtn = document.createElement('button');
     copyBtn.className = 'copy-btn';
-    copyBtn.textContent = 'Copia';
+    copyBtn.textContent = 'Copia tutto';
     copyBtn.addEventListener('click', () => this.onCopy(copyBtn));
     header.appendChild(copyBtn);
 
     parent.appendChild(header);
 
-    // ── Textarea (replaces <pre>) ────────────────────────────────────────
-    this.textarea = document.createElement('textarea');
-    this.textarea.className = 'code-textarea';
-    this.textarea.spellcheck = false;
-    this.textarea.autocomplete = 'off';
-    (this.textarea as any).autocorrect = 'off';
-    (this.textarea as any).autocapitalize = 'off';
-    parent.appendChild(this.textarea);
+    // ── Preamble section (collapsible) ───────────────────────────────────
+    const preambleHeader = document.createElement('div');
+    preambleHeader.className = 'code-section-header';
+    preambleHeader.textContent = '▶ Preambolo';
+    preambleHeader.title = 'Clicca per espandere/comprimere';
+    parent.appendChild(preambleHeader);
 
-    // Canvas → code
-    this.eventBus.on('document-changed', () => this.updateFromCanvas());
-    this.updateFromCanvas();
+    const preambleWrap = document.createElement('div');
+    preambleWrap.className = 'code-preamble-wrap collapsed';
+    parent.appendChild(preambleWrap);
 
-    // Code → canvas (debounced)
-    this.textarea.addEventListener('input', () => this.scheduleParseAndRender());
+    this.preambleArea = document.createElement('textarea');
+    this.preambleArea.className = 'code-textarea code-textarea--preamble';
+    this.preambleArea.spellcheck = false;
+    (this.preambleArea as any).autocorrect = 'off';
+    (this.preambleArea as any).autocapitalize = 'off';
+    this.preambleArea.value = this.latexDoc.preamble;
+    preambleWrap.appendChild(this.preambleArea);
 
-    // Prevent tool shortcuts from firing while editing code
-    this.textarea.addEventListener('keydown', (e) => e.stopPropagation());
+    preambleHeader.addEventListener('click', () => {
+      const collapsed = preambleWrap.classList.toggle('collapsed');
+      preambleHeader.textContent = (collapsed ? '▶' : '▼') + ' Preambolo';
+    });
+
+    // ── Body section ─────────────────────────────────────────────────────
+    const bodyHeader = document.createElement('div');
+    bodyHeader.className = 'code-section-header';
+    bodyHeader.textContent = 'Documento';
+    parent.appendChild(bodyHeader);
+
+    this.bodyArea = document.createElement('textarea');
+    this.bodyArea.className = 'code-textarea code-textarea--body';
+    this.bodyArea.spellcheck = false;
+    (this.bodyArea as any).autocorrect = 'off';
+    (this.bodyArea as any).autocapitalize = 'off';
+    this.bodyArea.value = this.latexDoc.body;
+    parent.appendChild(this.bodyArea);
+
+    // ── Events ───────────────────────────────────────────────────────────
+
+    // Model → textarea (CAD tools wrote to latexDoc)
+    this.eventBus.on('body-changed', () => this.syncFromModel());
+
+    // Textarea edits → model → schedule render
+    this.preambleArea.addEventListener('input', () => {
+      if (this.updatingFromModel) return;
+      this.latexDoc.preamble = this.preambleArea.value;
+      this.scheduleRender();
+    });
+
+    this.bodyArea.addEventListener('input', () => {
+      if (this.updatingFromModel) return;
+      this.latexDoc.body = this.bodyArea.value;
+      this.scheduleRender();
+    });
+
+    // Prevent tool shortcuts while editing
+    this.preambleArea.addEventListener('keydown', e => e.stopPropagation());
+    this.bodyArea.addEventListener('keydown', e => e.stopPropagation());
   }
 
-  // ── Canvas → Code ──────────────────────────────────────────────────────
+  // ── Model → textarea ──────────────────────────────────────────────────
 
-  private updateFromCanvas(): void {
-    if (this.updatingFromCanvas) return;
-    this.updatingFromCanvas = true;
+  private syncFromModel(): void {
+    this.updatingFromModel = true;
 
-    // Preserve cursor position if textarea is focused
-    const hasFocus = document.activeElement === this.textarea;
-    const selStart = this.textarea.selectionStart;
-    const selEnd   = this.textarea.selectionEnd;
-
-    this.textarea.value = this.emitter.emit(this.doc);
-
-    if (hasFocus) {
-      this.textarea.setSelectionRange(selStart, selEnd);
+    // Body: preserve cursor if focused
+    if (document.activeElement !== this.bodyArea) {
+      this.bodyArea.value = this.latexDoc.body;
+    } else {
+      const s = this.bodyArea.selectionStart;
+      const e = this.bodyArea.selectionEnd;
+      this.bodyArea.value = this.latexDoc.body;
+      this.bodyArea.setSelectionRange(s, e);
     }
 
-    this.updatingFromCanvas = false;
+    this.updatingFromModel = false;
   }
 
-  // ── Code → Canvas ──────────────────────────────────────────────────────
+  // ── Schedule render ───────────────────────────────────────────────────
 
-  private scheduleParseAndRender(): void {
-    if (this.parseTimer !== null) clearTimeout(this.parseTimer);
-    this.parseTimer = setTimeout(() => this.parseAndApply(), PARSE_DEBOUNCE_MS);
+  private scheduleRender(): void {
+    if (this.renderTimer !== null) clearTimeout(this.renderTimer);
+    this.renderTimer = setTimeout(() => {
+      this.renderTimer = null;
+      // Use dedicated event so main.ts doesn't overwrite latexDoc.body with emitter output
+      this.eventBus.emit({ type: 'user-edited-latex' });
+    }, RENDER_DEBOUNCE_MS);
   }
 
-  private parseAndApply(): void {
-    this.parseTimer = null;
-    try {
-      parseCircuiTikZ(this.textarea.value, this.doc, this.registry);
-      // Signal canvas to re-render without re-writing the textarea
-      this.updatingFromCanvas = true;
-      this.eventBus.emit({ type: 'document-changed' });
-      this.updatingFromCanvas = false;
-    } catch (err) {
-      console.warn('[CodePanel] parse error:', err);
-    }
-  }
-
-  // ── Copy ───────────────────────────────────────────────────────────────
+  // ── Copy ──────────────────────────────────────────────────────────────
 
   private onCopy(btn: HTMLButtonElement): void {
-    navigator.clipboard.writeText(this.textarea.value || '').then(() => {
+    const full = this.latexDoc.toFullSource();
+    navigator.clipboard.writeText(full).then(() => {
       const orig = btn.textContent;
       btn.textContent = 'Copiato!';
       setTimeout(() => { btn.textContent = orig; }, 1500);

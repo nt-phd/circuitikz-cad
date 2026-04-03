@@ -14,12 +14,19 @@ import { join } from 'path';
 
 const PORT = 3737;
 
-const LATEX_WRAPPER = (body) => `\\documentclass[tikz,border=2pt]{standalone}
+/**
+ * Wrap a bare TikZ snippet in a minimal standalone document.
+ * If the source already contains \documentclass, use it as-is.
+ */
+const LATEX_WRAPPER = (src) => {
+  if (src.includes('\\documentclass')) return src;
+  return `\\documentclass[tikz,border=2pt]{standalone}
 \\usepackage{circuitikz}
 \\begin{document}
-${body}
+${src}
 \\end{document}
 `;
+};
 
 function run(cmd, args, cwd) {
   return new Promise((resolve, reject) => {

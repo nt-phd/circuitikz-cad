@@ -138,7 +138,11 @@ export type AppEvent =
   | { type: 'selection-changed'; selectedIds: string[] }
   | { type: 'tool-changed'; tool: ToolType; defId?: string }
   | { type: 'style-changed'; style: 'european' | 'american' }
-  | { type: 'document-changed' };
+  | { type: 'document-changed' }
+  /** Fired when a CAD tool updates LatexDocument.body — CodePanel syncs its textarea. */
+  | { type: 'body-changed' }
+  /** Fired by CodePanel after debounce when the user finishes editing LaTeX manually. */
+  | { type: 'user-edited-latex' };
 
 // ============================================================
 // VIEW

@@ -4,79 +4,65 @@ import type { ComponentRegistry } from '../definitions/ComponentRegistry';
 import { formatCoord } from './CoordFormatter';
 import { formatLabel } from './LabelFormatter';
 
+/**
+ * Emits the tikzpicture body (without \begin/\end) from a CircuitDocument.
+ * Used by tools to regenerate the LatexDocument body after model changes.
+ */
 export class CircuiTikZEmitter {
   constructor(private registry: ComponentRegistry) {}
 
+  /** Emit a full \begin{tikzpicture}…\end{tikzpicture} block. */
   emit(doc: CircuitDocument): string {
     const lines: string[] = [];
-
     lines.push(`\\begin{tikzpicture}`);
-
-    // Emit wires
-    const wireLines = doc.wires.map(w => this.emitWire(w)).filter(Boolean);
-    if (wireLines.length > 0) {
-      for (const wl of wireLines) lines.push(`  ${wl}`);
-    }
-
-    // Emit bipoles
-    const bipoles = doc.components.filter(c => c.type === 'bipole') as BipoleInstance[];
-    for (const comp of bipoles) {
-      const def = this.registry.get(comp.defId);
-      if (!def) continue;
-      lines.push(`  ${this.emitBipole(comp, def.tikzName)}`);
-    }
-
-    // Emit monopoles
-    const monopoles = doc.components.filter(c => c.type === 'monopole') as MonopoleInstance[];
-    for (const comp of monopoles) {
-      const def = this.registry.get(comp.defId);
-      if (!def) continue;
-      lines.push(`  ${this.emitMonopole(comp, def.tikzName)}`);
-    }
-
+    for (const l of this.emitLines(doc)) lines.push(`  ${l}`);
     lines.push(`\\end{tikzpicture}`);
     return lines.join('\n');
+  }
+
+  /** Emit only the inner \draw lines (no begin/end wrapper). */
+  emitLines(doc: CircuitDocument): string[] {
+    const lines: string[] = [];
+
+    for (const w of doc.wires) {
+      const l = this.emitWire(w);
+      if (l) lines.push(l);
+    }
+
+    for (const comp of doc.components) {
+      if (comp.type === 'bipole') {
+        const def = this.registry.get(comp.defId);
+        if (def) lines.push(this.emitBipole(comp as BipoleInstance, def.tikzName));
+      } else if (comp.type === 'monopole') {
+        const def = this.registry.get(comp.defId);
+        if (def) lines.push(this.emitMonopole(comp as MonopoleInstance, def.tikzName));
+      }
+    }
+
+    return lines;
   }
 
   private emitBipole(comp: BipoleInstance, tikzName: string): string {
     const start = formatCoord(comp.start);
     const end = formatCoord(comp.end);
-
     const options: string[] = [tikzName];
 
-    // Terminal markers
     const termStr = this.terminalString(comp.props.startTerminal, comp.props.endTerminal);
-    if (termStr !== '-') {
-      options.push(termStr);
-    }
-
-    // Label
-    if (comp.props.label) {
-      options.push(`l=${formatLabel(comp.props.label)}`);
-    }
-
-    // Voltage annotation
-    if (comp.props.voltage) {
-      options.push(`v=${formatLabel(comp.props.voltage)}`);
-    }
-
-    // Current annotation
-    if (comp.props.current) {
-      options.push(`i=${formatLabel(comp.props.current)}`);
-    }
+    if (termStr !== '-') options.push(termStr);
+    if (comp.props.label)   options.push(`l=${formatLabel(comp.props.label)}`);
+    if (comp.props.voltage) options.push(`v=${formatLabel(comp.props.voltage)}`);
+    if (comp.props.current) options.push(`i=${formatLabel(comp.props.current)}`);
 
     return `\\draw ${start} to[${options.join(', ')}] ${end};`;
   }
 
   private emitMonopole(comp: MonopoleInstance, tikzName: string): string {
-    const pos = formatCoord(comp.position);
-    return `\\draw ${pos} node[${tikzName}] {};`;
+    return `\\draw ${formatCoord(comp.position)} node[${tikzName}] {};`;
   }
 
   private emitWire(wire: WireInstance): string {
     if (wire.points.length < 2) return '';
-    const coords = wire.points.map(p => formatCoord(p));
-    return `\\draw ${coords.join(' -- ')};`;
+    return `\\draw ${wire.points.map(formatCoord).join(' -- ')};`;
   }
 
   private terminalString(start?: TerminalMark, end?: TerminalMark): string {

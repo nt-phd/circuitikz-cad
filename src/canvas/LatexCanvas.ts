@@ -1,5 +1,5 @@
 /**
- * LatexCanvas — the main canvas that uses LaTeX as the sole renderer.
+ * LatexCanvas — renders a LatexDocument by compiling it with pdflatex+pdf2svg.
  *
  * DOM structure inside `container`:
  *   div.world-transform          ← CSS transform: translate(panX,panY) scale(zoom)
@@ -14,6 +14,7 @@
  */
 
 import type { GridPoint, ScreenPoint } from '../types';
+import type { LatexDocument } from '../model/LatexDocument';
 import type { CircuitDocument } from '../model/CircuitDocument';
 import type { ComponentRegistry } from '../definitions/ComponentRegistry';
 import type { SelectionState } from '../model/SelectionState';
@@ -21,15 +22,13 @@ import { ViewTransform } from './ViewTransform';
 import { SnapEngine } from './SnapEngine';
 import { GhostRenderer } from './GhostRenderer';
 import { HitTester } from './HitTester';
-import { PanZoomHandler } from './PanZoomHandler';
 import {
-  GRID_SIZE, TIKZ_PT_PER_UNIT, RENDER_SERVER_URL, RENDER_DEBOUNCE_MS,
+  GRID_SIZE, TIKZ_PT_PER_UNIT, RENDER_SERVER_URL,
   MAJOR_GRID_EVERY, GRID_COLOR_MINOR, GRID_COLOR_MAJOR,
-  ZOOM_STEP, MIN_ZOOM, MAX_ZOOM,
+  ZOOM_STEP,
 } from '../constants';
-import { createSvgElement, setAttrs } from '../utils/svg';
+import { createSvgElement } from '../utils/svg';
 
-const SVG_NS = 'http://www.w3.org/2000/svg';
 // pt-to-px scale at zoom=1: GRID_SIZE px per TikZ unit, 1 TikZ unit = TIKZ_PT_PER_UNIT pt
 const PT_TO_PX = GRID_SIZE / TIKZ_PT_PER_UNIT;
 
@@ -43,15 +42,15 @@ export class LatexCanvas {
   private latexDiv: HTMLDivElement;
   readonly overlaySvg: SVGSVGElement;
 
-  private debounceTimer: ReturnType<typeof setTimeout> | null = null;
-  private serverAvailable = true;
+  private renderInFlight = false;
+  private renderPending = false;
 
   // Grid SVG elements
   private patternMinor!: SVGPatternElement;
   private patternMajor!: SVGPatternElement;
   private gridRect!: SVGRectElement;
 
-  // Pan/zoom (operates on the overlay, updates worldDiv CSS)
+  // Pan/zoom
   private spaceHeld = false;
   private isPanning = false;
   private lastPanX = 0;
@@ -59,7 +58,8 @@ export class LatexCanvas {
 
   constructor(
     private container: HTMLElement,
-    private doc: CircuitDocument,
+    private latexDoc: LatexDocument,
+    private circuitDoc: CircuitDocument,
     private registry: ComponentRegistry,
     private selection: SelectionState,
   ) {
@@ -85,8 +85,8 @@ export class LatexCanvas {
 
     this.buildGrid();
 
-    this.hitTester = new HitTester(doc);
-    this.ghost = new GhostRenderer(this.overlaySvg, doc, registry, selection);
+    this.hitTester = new HitTester(circuitDoc);
+    this.ghost = new GhostRenderer(this.overlaySvg, circuitDoc, registry, selection);
 
     this.attachPanZoom();
 
@@ -115,18 +115,15 @@ export class LatexCanvas {
 
   refresh(): void {
     this.applyTransform();
-    this.updateGrid();
     this.ghost.renderSelection();
   }
 
+  /** Trigger a pdflatex render. Queues if one is already in flight. */
   scheduleRender(): void {
-    if (this.debounceTimer !== null) clearTimeout(this.debounceTimer);
-    this.debounceTimer = setTimeout(() => this.doRender(), RENDER_DEBOUNCE_MS);
-  }
-
-  // Force immediate render (skip debounce)
-  renderNow(): void {
-    if (this.debounceTimer !== null) clearTimeout(this.debounceTimer);
+    if (this.renderInFlight) {
+      this.renderPending = true;
+      return;
+    }
     this.doRender();
   }
 
@@ -137,37 +134,30 @@ export class LatexCanvas {
   // ====== LATEX RENDER ======
 
   private async doRender(): Promise<void> {
-    this.debounceTimer = null;
+    this.renderInFlight = true;
+    this.renderPending = false;
 
-    // Build latex from emitter (injected via callback to avoid circular deps)
-    const latex = this.latexCallback?.();
-    if (!latex) return;
+    const latex = this.latexDoc.toFullSource();
 
     try {
       const res = await fetch(`${RENDER_SERVER_URL}/render`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ latex }),
-        signal: AbortSignal.timeout(20000),
+        signal: AbortSignal.timeout(30000),
       });
       const data = await res.json() as { svg?: string; tx?: number; ty?: number; error?: string };
       if (data.svg) {
         this.injectSvg(data.svg, data.tx ?? 0, data.ty ?? 0);
-        this.serverAvailable = true;
       } else {
         console.warn('[LatexCanvas] render error:', data.error);
       }
     } catch (e) {
-      this.serverAvailable = false;
       console.warn('[LatexCanvas] server unreachable:', e);
+    } finally {
+      this.renderInFlight = false;
+      if (this.renderPending) this.doRender();
     }
-  }
-
-  private latexCallback: (() => string) | null = null;
-
-  /** Register the function that produces the current LaTeX source. */
-  setLatexCallback(fn: () => string): void {
-    this.latexCallback = fn;
   }
 
   private injectSvg(svgText: string, tx: number, ty: number): void {
@@ -175,19 +165,17 @@ export class LatexCanvas {
     const svgEl = this.latexDiv.querySelector('svg');
     if (!svgEl) return;
 
-    // Parse viewBox dimensions (in pt)
+    // Parse viewBox dimensions (in pt) and convert to px
     const vb = svgEl.getAttribute('viewBox')?.split(/\s+/).map(Number);
     if (vb && vb.length >= 4) {
-      const wPx = vb[2] * PT_TO_PX;
-      const hPx = vb[3] * PT_TO_PX;
-      svgEl.style.width = wPx + 'px';
-      svgEl.style.height = hPx + 'px';
+      svgEl.style.width  = (vb[2] * PT_TO_PX) + 'px';
+      svgEl.style.height = (vb[3] * PT_TO_PX) + 'px';
     }
     svgEl.removeAttribute('width');
     svgEl.removeAttribute('height');
     svgEl.style.overflow = 'visible';
 
-    // Align TikZ(0,0) with world origin (0,0)
+    // Align TikZ(0,0) with world origin
     // In the SVG, TikZ origin is at (tx, ty) pt → (tx*PT_TO_PX, ty*PT_TO_PX) px
     this.latexDiv.style.left = (-tx * PT_TO_PX) + 'px';
     this.latexDiv.style.top  = (-ty * PT_TO_PX) + 'px';
@@ -199,23 +187,19 @@ export class LatexCanvas {
     const defs = createSvgElement('defs') as SVGDefsElement;
 
     // Dot-grid: one pattern tile of GRID_SIZE × GRID_SIZE.
-    // Minor dots at every grid point, major dots every MAJOR_GRID_EVERY units.
-    // The overlay is inside worldDiv so CSS transform already handles pan+zoom —
+    // The overlay is inside worldDiv so CSS transform handles pan+zoom —
     // pattern coordinates stay fixed in world space.
     const majorSize = GRID_SIZE * MAJOR_GRID_EVERY;
 
-    // Minor dot pattern (one dot per tile, at origin = top-left corner of tile)
     this.patternMinor = createSvgElement('pattern', {
       id: 'lc-grid-minor', patternUnits: 'userSpaceOnUse',
       x: 0, y: 0, width: GRID_SIZE, height: GRID_SIZE,
     }) as SVGPatternElement;
     this.patternMinor.appendChild(createSvgElement('circle', {
-      cx: 0, cy: 0, r: 0.75,
-      fill: GRID_COLOR_MINOR,
+      cx: 0, cy: 0, r: 0.75, fill: GRID_COLOR_MINOR,
     }));
     defs.appendChild(this.patternMinor);
 
-    // Major dot pattern: fills with minor dots, then overlays a larger dot every N units
     this.patternMajor = createSvgElement('pattern', {
       id: 'lc-grid-major', patternUnits: 'userSpaceOnUse',
       x: 0, y: 0, width: majorSize, height: majorSize,
@@ -224,17 +208,13 @@ export class LatexCanvas {
       x: 0, y: 0, width: majorSize, height: majorSize,
       fill: 'url(#lc-grid-minor)',
     }));
-    // Larger dot at each major intersection (corners of the major tile)
     this.patternMajor.appendChild(createSvgElement('circle', {
-      cx: 0, cy: 0, r: 1.5,
-      fill: GRID_COLOR_MAJOR,
+      cx: 0, cy: 0, r: 1.5, fill: GRID_COLOR_MAJOR,
     }));
     defs.appendChild(this.patternMajor);
 
     this.overlaySvg.appendChild(defs);
 
-    // Cover a large area in world coordinates so the grid is always visible
-    // regardless of pan. The CSS transform handles the actual viewport mapping.
     const BIG = 20000;
     this.gridRect = createSvgElement('rect', {
       x: -BIG, y: -BIG, width: BIG * 2, height: BIG * 2,
@@ -242,10 +222,6 @@ export class LatexCanvas {
     }) as SVGRectElement;
     this.overlaySvg.insertBefore(this.gridRect, this.overlaySvg.firstChild);
   }
-
-  // Grid is static in world coords — CSS transform handles pan/zoom.
-  // This method is kept for resize events that need to refresh other elements.
-  private updateGrid(): void {}
 
   // ====== PAN/ZOOM ======
 

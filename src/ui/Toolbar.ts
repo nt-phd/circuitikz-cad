@@ -1,6 +1,8 @@
 import type { ToolManager } from '../tools/ToolManager';
 import type { EventBus } from '../utils/events';
 import type { CircuitDocument } from '../model/CircuitDocument';
+import type { LatexDocument } from '../model/LatexDocument';
+import { DEFAULT_BODY } from '../model/LatexDocument';
 
 export class Toolbar {
   private container: HTMLElement;
@@ -10,11 +12,11 @@ export class Toolbar {
     parent: HTMLElement,
     private toolManager: ToolManager,
     private eventBus: EventBus,
-    private doc: CircuitDocument,
+    private circuitDoc: CircuitDocument,
+    private latexDoc: LatexDocument,
   ) {
     this.container = parent;
     this.build();
-
     this.eventBus.on('tool-changed', () => this.updateActiveState());
   }
 
@@ -25,9 +27,10 @@ export class Toolbar {
 
     this.addSeparator();
 
-    // Clear all button
     this.addButton('Pulisci', 'clear', () => {
-      this.doc.clear();
+      this.circuitDoc.clear();
+      this.latexDoc.body = DEFAULT_BODY;
+      this.eventBus.emit({ type: 'body-changed' });
       this.eventBus.emit({ type: 'document-changed' });
     });
 

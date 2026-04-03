@@ -343,7 +343,6 @@ html, body {
 }
 
 .code-textarea {
-  flex: 1;
   margin: 0;
   padding: 10px;
   overflow: auto;
@@ -359,6 +358,47 @@ html, body {
   resize: none;
   width: 100%;
   box-sizing: border-box;
+}
+
+.code-textarea--body {
+  flex: 1;
+  min-height: 0;
+}
+
+.code-textarea--preamble {
+  height: 100%;
+  width: 100%;
+}
+
+/* Section sub-header inside code panel */
+.code-section-header {
+  flex-shrink: 0;
+  padding: 3px 10px;
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: #777;
+  background: #2a2a2a;
+  border-top: 1px solid #333;
+  cursor: pointer;
+  user-select: none;
+}
+
+.code-section-header:hover {
+  color: #aaa;
+}
+
+/* Collapsible preamble wrapper */
+.code-preamble-wrap {
+  overflow: hidden;
+  transition: max-height 0.2s ease;
+  max-height: 300px;
+  border-bottom: 1px solid #333;
+}
+
+.code-preamble-wrap.collapsed {
+  max-height: 0;
 }
 
 /* ====== STATUS BAR ====== */
