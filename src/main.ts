@@ -14,6 +14,7 @@ import { ComponentPalette } from './ui/ComponentPalette';
 import { PropertyPanel } from './ui/PropertyPanel';
 import { CodePanel } from './ui/CodePanel';
 import { StatusBar } from './ui/StatusBar';
+import { parseCircuiTikZ } from './codegen/CircuiTikZParser';
 import type { ToolContext } from './tools/BaseTool';
 
 // ── Right-panel collapsible sections ──────────────────────────────────────────
@@ -82,12 +83,19 @@ async function init() {
 
   /**
    * User finished typing in CodePanel (debounced).
-   * latexDoc.preamble / latexDoc.body are already up to date.
-   * Just recompile — do NOT touch circuitDoc.
+   * latexDoc.body is already up to date.
+   * Parse body into circuitDoc so CAD tools (hit-test, drag) stay in sync,
+   * then recompile.
    */
   eventBus.on('user-edited-latex', () => {
+    parseCircuiTikZ(latexDoc.body, circuitDoc, registry);
     canvas.scheduleRender();
   });
+
+  // Parse the default body so circuitDoc is populated from the start.
+  // Without this, clicking on the canvas immediately triggers document-changed
+  // which overwrites the body with the empty circuitDoc emitter output.
+  parseCircuiTikZ(latexDoc.body, circuitDoc, registry);
 
   canvas.overlaySvg.addEventListener('mousemove', (e) => {
     statusBar.updateCoords(canvas.eventToGridRaw(e));

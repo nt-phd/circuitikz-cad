@@ -5,6 +5,7 @@ import type { SelectionState } from '../model/SelectionState';
 export class SelectTool extends BaseTool {
   private selection: SelectionState;
   private isDragging = false;
+  private hasDragged = false;
   private dragStartGrid: GridPoint | null = null;
   private dragOriginalPositions = new Map<string, { start?: GridPoint; end?: GridPoint; position?: GridPoint }>();
 
@@ -25,6 +26,7 @@ export class SelectTool extends BaseTool {
         this.selection.select(hitId);
       }
       this.isDragging = true;
+      this.hasDragged = false;
       this.dragStartGrid = gridPt;
 
       this.dragOriginalPositions.clear();
@@ -43,7 +45,11 @@ export class SelectTool extends BaseTool {
       this.selection.clear();
       this.ctx.emit({ type: 'selection-changed', selectedIds: [] });
     }
-    this.ctx.emit({ type: 'document-changed' });
+    // Emit document-changed only to refresh selection overlay — but only
+    // if circuitDoc actually has content (so we don't trigger body overwrite
+    // when the user clicks on free-form LaTeX content not in the model).
+    // We use a dedicated 'selection-changed' for overlay refresh; PropertyPanel
+    // listens to selection-changed already, so no document-changed needed here.
   }
 
   onMouseMove(gridPt: GridPoint, _e: MouseEvent): void {
@@ -52,6 +58,7 @@ export class SelectTool extends BaseTool {
     const dy = gridPt.y - this.dragStartGrid.y;
     if (dx === 0 && dy === 0) return;
 
+    this.hasDragged = true;
     const doc = this.ctx.getDocument();
     for (const [id, orig] of this.dragOriginalPositions) {
       const comp = doc.getComponent(id);
@@ -63,11 +70,17 @@ export class SelectTool extends BaseTool {
         (comp as MonopoleInstance).position = { x: orig.position.x + dx, y: orig.position.y + dy };
       }
     }
-    this.ctx.emit({ type: 'document-changed' });
+    // Only refresh overlay during drag, not a full recompile
+    this.ctx.emit({ type: 'selection-changed', selectedIds: this.selection.getSelectedIds() });
   }
 
   onMouseUp(_gridPt: GridPoint, _e: MouseEvent): void {
+    if (this.hasDragged) {
+      // Drag completed — positions changed, regenerate body and recompile
+      this.ctx.emit({ type: 'document-changed' });
+    }
     this.isDragging = false;
+    this.hasDragged = false;
     this.dragStartGrid = null;
     this.dragOriginalPositions.clear();
   }
