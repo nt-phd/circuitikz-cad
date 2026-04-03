@@ -342,6 +342,25 @@ html, body {
   tab-size: 2;
 }
 
+.code-textarea {
+  flex: 1;
+  margin: 0;
+  padding: 10px;
+  overflow: auto;
+  font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre;
+  tab-size: 2;
+  background: transparent;
+  color: #d4d4d4;
+  border: none;
+  outline: none;
+  resize: none;
+  width: 100%;
+  box-sizing: border-box;
+}
+
 /* ====== STATUS BAR ====== */
 .status-bar {
   grid-area: status;

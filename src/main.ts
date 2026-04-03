@@ -44,7 +44,7 @@ async function init() {
 
   new PropertyPanel(document.getElementById('props')!, doc, selection, eventBus, registry);
 
-  new CodePanel(document.getElementById('code-panel')!, emitter, doc, eventBus);
+  new CodePanel(document.getElementById('code-panel')!, emitter, doc, registry, eventBus);
 
   const statusBar = new StatusBar(document.getElementById('status-bar')!, canvas.view, toolManager, eventBus);
 
