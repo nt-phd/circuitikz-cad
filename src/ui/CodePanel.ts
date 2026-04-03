@@ -8,6 +8,7 @@ export class CodePanel {
   private bodyArea: HTMLTextAreaElement;
   private renderTimer: ReturnType<typeof setTimeout> | null = null;
   private updatingFromModel = false;
+  private lastCaretLineIndex = -1;
 
   constructor(
     preambleParent: HTMLElement,
@@ -46,6 +47,7 @@ export class CodePanel {
     this.bodyArea.addEventListener('input', () => {
       if (this.updatingFromModel) return;
       this.latexDoc.body = this.bodyArea.value;
+      this.emitCaretSelection();
       this.scheduleRender();
     });
 
@@ -53,10 +55,9 @@ export class CodePanel {
     this.preambleArea.addEventListener('keydown', e => e.stopPropagation());
     this.bodyArea.addEventListener('keydown',    e => e.stopPropagation());
 
-    // Clicking in the body textarea clears canvas selection
-    this.bodyArea.addEventListener('click', () => {
-      this.eventBus.emit({ type: 'selection-changed', selectedIds: [] });
-    });
+    for (const eventName of ['click', 'keyup', 'select', 'mouseup'] as const) {
+      this.bodyArea.addEventListener(eventName, () => this.emitCaretSelection());
+    }
   }
 
   // ── Public API ────────────────────────────────────────────────────────────
@@ -65,7 +66,7 @@ export class CodePanel {
    * Highlight the line at the given 0-based index in the body textarea.
    * Scrolls the line into view and selects it.
    */
-  highlightLine(lineIndex: number): void {
+  highlightLine(lineIndex: number, focus: boolean = true): void {
     const text = this.bodyArea.value;
     const lines = text.split('\n');
     if (lineIndex < 0 || lineIndex >= lines.length) return;
@@ -74,7 +75,7 @@ export class CodePanel {
     for (let i = 0; i < lineIndex; i++) start += lines[i].length + 1;
     const end = start + lines[lineIndex].length;
 
-    this.bodyArea.focus({ preventScroll: true });
+    if (focus) this.bodyArea.focus({ preventScroll: true });
     this.bodyArea.setSelectionRange(start, end);
 
     // Scroll line into view
@@ -122,6 +123,23 @@ export class CodePanel {
       this.renderTimer = null;
       this.eventBus.emit({ type: 'user-edited-latex' });
     }, RENDER_DEBOUNCE_MS);
+  }
+
+  private emitCaretSelection(): void {
+    if (this.updatingFromModel) return;
+    const lineIndex = this.currentCaretLineIndex();
+    if (lineIndex === this.lastCaretLineIndex) return;
+    this.lastCaretLineIndex = lineIndex;
+    this.eventBus.emit({ type: 'code-caret-changed', lineIndex });
+  }
+
+  private currentCaretLineIndex(): number {
+    const pos = this.bodyArea.selectionStart;
+    let lineIndex = 0;
+    for (let i = 0; i < pos; i++) {
+      if (this.bodyArea.value.charCodeAt(i) === 10) lineIndex++;
+    }
+    return lineIndex;
   }
 
   private onCopy(btn: HTMLButtonElement): void {

@@ -99,12 +99,20 @@ async function init() {
   // Selection changed → highlight line in CodePanel
   eventBus.on('selection-changed', (e) => {
     if (e.type !== 'selection-changed') return;
+    selection.setSelectedIds(e.selectedIds);
     canvas.refresh(); // redraw selection overlay
 
     const ids = e.selectedIds;
     if (ids.length !== 1) return;
     const lineIdx = lineIndexFromId(ids[0]);
-    if (lineIdx >= 0) codePanel.highlightLine(lineIdx);
+    if (lineIdx >= 0 && e.source !== 'code') codePanel.highlightLine(lineIdx);
+  });
+
+  eventBus.on('code-caret-changed', (e) => {
+    if (e.type !== 'code-caret-changed') return;
+    const id = `line:${e.lineIndex}`;
+    const selectedIds = (circuitDoc.getComponent(id) || circuitDoc.getWire(id)) ? [id] : [];
+    eventBus.emit({ type: 'selection-changed', selectedIds, source: 'code' });
   });
 
   // document-changed: SelectTool drag completed or Delete

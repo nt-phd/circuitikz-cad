@@ -40,10 +40,10 @@ export class SelectTool extends BaseTool {
           }
         }
       }
-      this.ctx.emit({ type: 'selection-changed', selectedIds: this.selection.getSelectedIds() });
+      this.ctx.emit({ type: 'selection-changed', selectedIds: this.selection.getSelectedIds(), source: 'canvas' });
     } else {
       this.selection.clear();
-      this.ctx.emit({ type: 'selection-changed', selectedIds: [] });
+      this.ctx.emit({ type: 'selection-changed', selectedIds: [], source: 'canvas' });
     }
     // Emit document-changed only to refresh selection overlay — but only
     // if circuitDoc actually has content (so we don't trigger body overwrite
@@ -71,7 +71,7 @@ export class SelectTool extends BaseTool {
       }
     }
     // Only refresh overlay during drag, not a full recompile
-    this.ctx.emit({ type: 'selection-changed', selectedIds: this.selection.getSelectedIds() });
+    this.ctx.emit({ type: 'selection-changed', selectedIds: this.selection.getSelectedIds(), source: 'canvas' });
   }
 
   onMouseUp(_gridPt: GridPoint, _e: MouseEvent): void {
@@ -93,7 +93,7 @@ export class SelectTool extends BaseTool {
         doc.removeWire(id);
       }
       this.selection.clear();
-      this.ctx.emit({ type: 'selection-changed', selectedIds: [] });
+      this.ctx.emit({ type: 'selection-changed', selectedIds: [], source: 'canvas' });
       this.ctx.emit({ type: 'document-changed' });
     }
   }

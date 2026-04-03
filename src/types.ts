@@ -135,14 +135,16 @@ export type AppEvent =
   | { type: 'component-props-changed'; id: string; props: Partial<ComponentProps> }
   | { type: 'wire-added'; wire: WireInstance }
   | { type: 'wire-removed'; id: string }
-  | { type: 'selection-changed'; selectedIds: string[] }
+  | { type: 'selection-changed'; selectedIds: string[]; source?: 'canvas' | 'code' | 'programmatic' }
   | { type: 'tool-changed'; tool: ToolType; defId?: string }
   | { type: 'style-changed'; style: 'european' | 'american' }
   | { type: 'document-changed' }
   /** Fired when a CAD tool updates LatexDocument.body — CodePanel syncs its textarea. */
   | { type: 'body-changed' }
   /** Fired by CodePanel after debounce when the user finishes editing LaTeX manually. */
-  | { type: 'user-edited-latex' };
+  | { type: 'user-edited-latex' }
+  /** Fired by CodePanel when the caret moves to another source line. */
+  | { type: 'code-caret-changed'; lineIndex: number };
 
 // ============================================================
 // VIEW

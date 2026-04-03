@@ -1,6 +1,10 @@
 export class SelectionState {
   private selectedIds = new Set<string>();
 
+  setSelectedIds(ids: string[]): void {
+    this.selectedIds = new Set(ids);
+  }
+
   select(id: string): void {
     this.selectedIds.clear();
     this.selectedIds.add(id);
