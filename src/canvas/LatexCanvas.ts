@@ -310,8 +310,8 @@ export class LatexCanvas {
       height: BIG * 2,
       fill: 'url(#lc-grid-major)',
     }) as SVGRectElement;
-    this.gridSvg.appendChild(this.gridRectMajor);
     this.gridSvg.appendChild(this.gridRectMinor);
+    this.gridSvg.appendChild(this.gridRectMajor);
     this.updateGridDotScale();
   }
 

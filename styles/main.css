@@ -309,7 +309,7 @@ html, body {
 /* The section that holds the code editor grows to fill remaining space */
 .rpanel-section--grow {
   flex: 1;
-  min-height: 80px;
+  min-height: 160px;
 }
 
 .rpanel-section-header {
@@ -346,6 +346,7 @@ html, body {
    ============================================================ */
 #props {
   padding: 0.875rem;
+  min-height: 0;
 }
 
 #props h3 {
@@ -359,6 +360,13 @@ html, body {
 
 #props .prop-group {
   margin-bottom: 0.75rem;
+}
+
+.code-textarea--compact {
+  min-height: 160px;
+  resize: vertical;
+  border: 1px solid var(--input);
+  border-radius: calc(var(--radius) - 2px);
 }
 
 #props label {
@@ -436,6 +444,22 @@ html, body {
   outline: none;
   resize: none;
   box-sizing: border-box;
+}
+
+#section-document {
+  flex: 2 1 320px;
+}
+
+#section-document .rpanel-section-body {
+  display: flex;
+  min-height: 0;
+}
+
+#document-panel {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
 }
 
 /* Copy button row above document textarea */

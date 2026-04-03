@@ -198,10 +198,16 @@ function PropertiesView({
   handle,
   selectedIds,
   documentVersion,
+  preamble,
+  setPreamble,
+  stopShortcutPropagation,
 }: {
   handle: ImperativeAppHandle | null;
   selectedIds: string[];
   documentVersion: number;
+  preamble: string;
+  setPreamble: (value: string) => void;
+  stopShortcutPropagation: (e: ReactKeyboardEvent<HTMLTextAreaElement>) => void;
 }) {
   if (!handle) return <div id="props" />;
 
@@ -217,7 +223,21 @@ function PropertiesView({
 
   return (
     <div id="props" data-version={documentVersion}>
-      {selectionCount === 0 ? <div className="empty-hint">Select a component to edit its properties</div> : null}
+      {selectionCount === 0 ? (
+        <>
+          <h3>Document</h3>
+          <div className="prop-group">
+            <label>Preamble</label>
+            <textarea
+              className="code-textarea code-textarea--compact"
+              onChange={(e) => setPreamble(e.target.value)}
+              onKeyDown={stopShortcutPropagation}
+              spellCheck={false}
+              value={preamble}
+            />
+          </div>
+        </>
+      ) : null}
       {selectionCount > 1 ? <div className="empty-hint">{selectionCount} elements selected</div> : null}
       {selectionCount === 1 && wire ? <div className="empty-hint">Wire — edit in Document panel</div> : null}
       {selectionCount === 1 && comp ? (
@@ -409,28 +429,6 @@ function useCodeEditors(handle: ImperativeAppHandle | null) {
   };
 }
 
-function PreambleEditor({
-  preamble,
-  setPreamble,
-  stopShortcutPropagation,
-}: {
-  preamble: string;
-  setPreamble: (value: string) => void;
-  stopShortcutPropagation: (e: ReactKeyboardEvent<HTMLTextAreaElement>) => void;
-}) {
-  return (
-    <div id="preamble-panel">
-      <textarea
-        className="code-textarea"
-        onChange={(e) => setPreamble(e.target.value)}
-        onKeyDown={stopShortcutPropagation}
-        spellCheck={false}
-        value={preamble}
-      />
-    </div>
-  );
-}
-
 function DocumentEditor({
   body,
   copyLabel,
@@ -575,7 +573,6 @@ function AppShell({ handle }: { handle: ImperativeAppHandle | null }) {
   const [collapsed, setCollapsed] = useState({
     library: false,
     props: false,
-    preamble: true,
     document: false,
   });
 
@@ -603,18 +600,8 @@ function AppShell({ handle }: { handle: ImperativeAppHandle | null }) {
           <PropertiesView
             documentVersion={documentVersion}
             handle={handle}
-            selectedIds={selectedIds}
-          />
-        </Section>
-
-        <Section
-          collapsed={collapsed.preamble}
-          onToggle={() => setCollapsed((prev) => ({ ...prev, preamble: !prev.preamble }))}
-          sectionId="section-preamble"
-          title="Preamble"
-        >
-          <PreambleEditor
             preamble={codeEditors.preamble}
+            selectedIds={selectedIds}
             setPreamble={codeEditors.setPreamble}
             stopShortcutPropagation={codeEditors.stopShortcutPropagation}
           />
