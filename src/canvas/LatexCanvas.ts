@@ -27,10 +27,12 @@ import {
   MAJOR_GRID_EVERY, GRID_COLOR_MINOR, GRID_COLOR_MAJOR,
   ZOOM_STEP,
 } from '../constants';
+import { scaleState } from './ScaleState';
 import { createSvgElement } from '../utils/svg';
 
-// pt-to-px scale at zoom=1: GRID_SIZE px per TikZ unit, 1 TikZ unit = TIKZ_PT_PER_UNIT pt
-const PT_TO_PX = GRID_SIZE / TIKZ_PT_PER_UNIT;
+// Base pt-to-px at zoom=1, scale=1: 20px per TikZ unit, 1 TikZ unit = TIKZ_PT_PER_UNIT pt
+// The actual conversion must include tikzScale: PT_TO_PX * tikzScale
+const BASE_PT_TO_PX = GRID_SIZE / TIKZ_PT_PER_UNIT;
 
 export class LatexCanvas {
   readonly view: ViewTransform;
@@ -119,6 +121,20 @@ export class LatexCanvas {
     this.ghost.renderSelection();
   }
 
+  updateGridScale(): void {
+    const gs = scaleState.effectiveGridSize;
+    const majorSize = gs * MAJOR_GRID_EVERY;
+    this.patternMinor.setAttribute('width', String(gs));
+    this.patternMinor.setAttribute('height', String(gs));
+    this.patternMajor.setAttribute('width', String(majorSize));
+    this.patternMajor.setAttribute('height', String(majorSize));
+    const majorRect = this.patternMajor.querySelector('rect');
+    if (majorRect) {
+      majorRect.setAttribute('width', String(majorSize));
+      majorRect.setAttribute('height', String(majorSize));
+    }
+  }
+
   /** Trigger a pdflatex render. Queues if one is already in flight. */
   scheduleRender(): void {
     if (this.renderInFlight) {
@@ -169,20 +185,27 @@ export class LatexCanvas {
     const svgEl = this.latexDiv.querySelector('svg');
     if (!svgEl) return;
 
+    // pt-to-px must account for tikzpicture scale so the SVG aligns with
+    // the overlay grid (which uses effectiveGridSize = GRID_SIZE × tikzScale).
+    // pdflatex already bakes the scale into the pt coordinates, so we do NOT
+    // divide by tikzScale here — we just use the base conversion.
+    // The overlay grid tile = GRID_SIZE × tikzScale px, and the SVG pt coords
+    // already represent scaled TikZ units, so BASE_PT_TO_PX is correct as-is.
+    const ptToPx = BASE_PT_TO_PX;
+
     // Parse viewBox dimensions (in pt) and convert to px
     const vb = svgEl.getAttribute('viewBox')?.split(/\s+/).map(Number);
     if (vb && vb.length >= 4) {
-      svgEl.style.width  = (vb[2] * PT_TO_PX) + 'px';
-      svgEl.style.height = (vb[3] * PT_TO_PX) + 'px';
+      svgEl.style.width  = (vb[2] * ptToPx) + 'px';
+      svgEl.style.height = (vb[3] * ptToPx) + 'px';
     }
     svgEl.removeAttribute('width');
     svgEl.removeAttribute('height');
     svgEl.style.overflow = 'visible';
 
     // Align TikZ(0,0) with world origin
-    // In the SVG, TikZ origin is at (tx, ty) pt → (tx*PT_TO_PX, ty*PT_TO_PX) px
-    this.latexDiv.style.left = (-tx * PT_TO_PX) + 'px';
-    this.latexDiv.style.top  = (-ty * PT_TO_PX) + 'px';
+    this.latexDiv.style.left = (-tx * ptToPx) + 'px';
+    this.latexDiv.style.top  = (-ty * ptToPx) + 'px';
   }
 
   // ====== ERROR BANNER ======
@@ -207,14 +230,14 @@ export class LatexCanvas {
   private buildGrid(): void {
     const defs = createSvgElement('defs') as SVGDefsElement;
 
-    // Dot-grid: one pattern tile of GRID_SIZE × GRID_SIZE.
-    // The overlay is inside worldDiv so CSS transform handles pan+zoom —
-    // pattern coordinates stay fixed in world space.
-    const majorSize = GRID_SIZE * MAJOR_GRID_EVERY;
+    // Grid tile size = effectiveGridSize (GRID_SIZE × tikzScale).
+    // Updated in updateGridScale() when the scale changes.
+    const gs = scaleState.effectiveGridSize;
+    const majorSize = gs * MAJOR_GRID_EVERY;
 
     this.patternMinor = createSvgElement('pattern', {
       id: 'lc-grid-minor', patternUnits: 'userSpaceOnUse',
-      x: 0, y: 0, width: GRID_SIZE, height: GRID_SIZE,
+      x: 0, y: 0, width: gs, height: gs,
     }) as SVGPatternElement;
     this.patternMinor.appendChild(createSvgElement('circle', {
       cx: 0, cy: 0, r: 0.75, fill: GRID_COLOR_MINOR,

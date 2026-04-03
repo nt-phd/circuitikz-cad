@@ -14,6 +14,7 @@ import { PropertyPanel } from './ui/PropertyPanel';
 import { CodePanel } from './ui/CodePanel';
 import { StatusBar } from './ui/StatusBar';
 import { parseCircuiTikZ, lineIndexFromId } from './codegen/CircuiTikZParser';
+import { extractTikzScale, scaleState } from './canvas/ScaleState';
 import type { ToolContext } from './tools/BaseTool';
 
 function initCollapsibleSections(): void {
@@ -49,13 +50,22 @@ async function init() {
   const canvasContainer = document.getElementById('canvas-container')!;
   const canvas = new LatexCanvas(canvasContainer, latexDoc, circuitDoc, registry, selection);
 
+  const syncTikzScale = () => {
+    scaleState.tikzScale = extractTikzScale(latexDoc.body);
+    canvas.updateGridScale();
+  };
+
+  syncTikzScale();
+
   const toolCtx: ToolContext = {
     ghost: canvas.ghost,
     hitTester: canvas.hitTester,
     emit: (e) => eventBus.emit(e),
     getDocument: () => circuitDoc,
+    getDef: (defId: string) => registry.get(defId),
     appendLine: (line: string) => {
       latexDoc.body = appendLineToBody(latexDoc.body, line);
+      syncTikzScale();
       parseCircuiTikZ(latexDoc.body, circuitDoc, registry);
       eventBus.emit({ type: 'body-changed' });
       canvas.refresh();
@@ -105,12 +115,14 @@ async function init() {
 
   // user-edited-latex: user typed in textarea
   eventBus.on('user-edited-latex', () => {
+    syncTikzScale();
     parseCircuiTikZ(latexDoc.body, circuitDoc, registry);
     selection.clear();
     canvas.refresh();
     canvas.scheduleRender();
   });
 
+  syncTikzScale();
   parseCircuiTikZ(latexDoc.body, circuitDoc, registry);
 
   canvas.overlaySvg.addEventListener('mousemove', (e) => {

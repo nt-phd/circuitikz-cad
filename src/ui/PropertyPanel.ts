@@ -100,9 +100,10 @@ export class PropertyPanel {
 
   /** Reconstruct the LaTeX source line from a component's current props. */
   private buildSourceLine(comp: ComponentInstance): string | null {
+    const tikzName = this.registry.get(comp.defId)?.tikzName ?? comp.defId;
     if (comp.type === 'bipole') {
       const b = comp as BipoleInstance;
-      const opts: string[] = [comp.defId];
+      const opts: string[] = [tikzName];
       const ts = b.props.startTerminal === 'dot' ? '*' : b.props.startTerminal === 'open' ? 'o' : '';
       const te = b.props.endTerminal   === 'dot' ? '*' : b.props.endTerminal   === 'open' ? 'o' : '';
       const term = `${ts}-${te}`;
@@ -114,7 +115,7 @@ export class PropertyPanel {
     }
     if (comp.type === 'monopole') {
       const m = comp as MonopoleInstance;
-      return `  \\draw ${formatCoord(m.position)} node[${comp.defId}] {};`;
+      return `  \\draw ${formatCoord(m.position)} node[${tikzName}] {};`;
     }
     return null;
   }

@@ -1,5 +1,5 @@
 import type { GridPoint } from '../types';
-import { GRID_SIZE } from '../constants';
+import { scaleState } from './ScaleState';
 
 export class SnapEngine {
   snapToGrid(raw: GridPoint): GridPoint {
@@ -10,9 +10,10 @@ export class SnapEngine {
   }
 
   snapWorldToGrid(worldX: number, worldY: number): GridPoint {
+    const gs = scaleState.effectiveGridSize;
     return {
-      x: Math.round(worldX / GRID_SIZE),
-      y: Math.round(worldY / GRID_SIZE),
+      x: Math.round(worldX / gs),
+      y: Math.round(worldY / gs),
     };
   }
 }

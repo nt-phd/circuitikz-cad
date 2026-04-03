@@ -21,8 +21,9 @@ export class PlaceBipoleTool extends BaseTool {
       this.startPoint = gridPt;
     } else {
       if (pointsEqual(this.startPoint, gridPt)) return;
+      const tikzName = this.ctx.getDef(this.defId)?.tikzName ?? this.defId;
       this.ctx.appendLine(
-        `\\draw ${formatCoord(this.startPoint)} to[${this.defId}] ${formatCoord(gridPt)};`
+        `\\draw ${formatCoord(this.startPoint)} to[${tikzName}] ${formatCoord(gridPt)};`
       );
       this.startPoint = null;
       this.ctx.ghost.setGhostElement(null);

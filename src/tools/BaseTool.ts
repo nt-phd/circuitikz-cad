@@ -1,12 +1,14 @@
 import type { GridPoint } from '../types';
 import type { GhostRenderer } from '../canvas/GhostRenderer';
 import type { HitTester } from '../canvas/HitTester';
+import type { ComponentDef } from '../types';
 
 export interface ToolContext {
   ghost: GhostRenderer;
   hitTester: HitTester;
   emit: (event: import('../types').AppEvent) => void;
   getDocument: () => import('../model/CircuitDocument').CircuitDocument;
+  getDef: (defId: string) => ComponentDef | undefined;
   /** Append a \draw line to the tikzpicture body and trigger a render. */
   appendLine: (line: string) => void;
 }

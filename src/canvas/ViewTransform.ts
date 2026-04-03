@@ -1,5 +1,6 @@
 import type { GridPoint, ScreenPoint } from '../types';
-import { GRID_SIZE, MIN_ZOOM, MAX_ZOOM } from '../constants';
+import { MIN_ZOOM, MAX_ZOOM } from '../constants';
+import { scaleState } from './ScaleState';
 
 export class ViewTransform {
   private _panX = 0;
@@ -10,6 +11,8 @@ export class ViewTransform {
   get panY(): number { return this._panY; }
   get zoom(): number { return this._zoom; }
 
+  private get gs(): number { return scaleState.effectiveGridSize; }
+
   screenToWorld(screen: ScreenPoint): { x: number; y: number } {
     return {
       x: (screen.x - this._panX) / this._zoom,
@@ -18,10 +21,7 @@ export class ViewTransform {
   }
 
   worldToGrid(world: { x: number; y: number }): GridPoint {
-    return {
-      x: world.x / GRID_SIZE,
-      y: world.y / GRID_SIZE,
-    };
+    return { x: world.x / this.gs, y: world.y / this.gs };
   }
 
   screenToGrid(screen: ScreenPoint): GridPoint {
@@ -32,13 +32,13 @@ export class ViewTransform {
 
   gridToScreen(grid: GridPoint): ScreenPoint {
     return {
-      x: grid.x * GRID_SIZE * this._zoom + this._panX,
-      y: grid.y * GRID_SIZE * this._zoom + this._panY,
+      x: grid.x * this.gs * this._zoom + this._panX,
+      y: grid.y * this.gs * this._zoom + this._panY,
     };
   }
 
   gridToWorld(grid: GridPoint): { x: number; y: number } {
-    return { x: grid.x * GRID_SIZE, y: grid.y * GRID_SIZE };
+    return { x: grid.x * this.gs, y: grid.y * this.gs };
   }
 
   pan(dx: number, dy: number): void {
