@@ -1,19 +1,17 @@
 /**
- * CodePanel — bidirectional LaTeX editor.
- *
- * Two sections:
- *   Preamble  — collapsible textarea (packages, ctikzset, etc.)
- *   Body      — always-visible textarea (TikZ/LaTeX content)
+ * CodePanel — attaches to two separate DOM containers:
+ *   preambleParent  — the collapsible Preamble section body
+ *   documentParent  — the always-visible Document section body
  *
  * Flow:
- *   CAD tool action → document-changed → latexDoc.body updated → body-changed → textarea synced
+ *   CAD tool → document-changed → latexDoc.body updated → body-changed → textarea synced
  *   User edits textarea → latexDoc updated → user-edited-latex → canvas re-renders
  */
 
 import type { LatexDocument } from '../model/LatexDocument';
 import type { EventBus } from '../utils/events';
 
-const RENDER_DEBOUNCE_MS = 800;
+const RENDER_DEBOUNCE_MS = 600;
 
 export class CodePanel {
   private preambleArea: HTMLTextAreaElement;
@@ -22,56 +20,36 @@ export class CodePanel {
   private updatingFromModel = false;
 
   constructor(
-    parent: HTMLElement,
+    preambleParent: HTMLElement,
+    documentParent: HTMLElement,
     private latexDoc: LatexDocument,
     private eventBus: EventBus,
   ) {
-    // Header
-    const header = document.createElement('div');
-    header.className = 'code-header';
-    const title = document.createElement('span');
-    title.textContent = 'LaTeX';
-    header.appendChild(title);
+    // ── Preamble textarea ────────────────────────────────────────────────
+    this.preambleArea = this.makeTextarea();
+    this.preambleArea.value = this.latexDoc.preamble;
+    preambleParent.appendChild(this.preambleArea);
+
+    // ── Document textarea + copy button ──────────────────────────────────
+    const copyRow = document.createElement('div');
+    copyRow.className = 'code-copy-row';
     const copyBtn = document.createElement('button');
     copyBtn.className = 'copy-btn';
     copyBtn.textContent = 'Copy';
     copyBtn.addEventListener('click', () => this.onCopy(copyBtn));
-    header.appendChild(copyBtn);
-    parent.appendChild(header);
+    copyRow.appendChild(copyBtn);
+    documentParent.appendChild(copyRow);
 
-    // Preamble section (collapsible)
-    const preambleHeader = document.createElement('div');
-    preambleHeader.className = 'code-section-header';
-    preambleHeader.textContent = '▶ Preamble';
-    parent.appendChild(preambleHeader);
-
-    const preambleWrap = document.createElement('div');
-    preambleWrap.className = 'code-preamble-wrap collapsed';
-    parent.appendChild(preambleWrap);
-
-    this.preambleArea = this.makeTextarea('code-textarea code-textarea--preamble');
-    this.preambleArea.value = this.latexDoc.preamble;
-    preambleWrap.appendChild(this.preambleArea);
-
-    preambleHeader.addEventListener('click', () => {
-      const collapsed = preambleWrap.classList.toggle('collapsed');
-      preambleHeader.textContent = (collapsed ? '▶' : '▼') + ' Preamble';
-    });
-
-    // Body section
-    const bodyHeader = document.createElement('div');
-    bodyHeader.className = 'code-section-header';
-    bodyHeader.textContent = 'Document';
-    parent.appendChild(bodyHeader);
-
-    this.bodyArea = this.makeTextarea('code-textarea code-textarea--body');
+    this.bodyArea = this.makeTextarea();
     this.bodyArea.value = this.latexDoc.body;
-    parent.appendChild(this.bodyArea);
+    documentParent.appendChild(this.bodyArea);
 
-    // Model → textarea
+    // ── Events ───────────────────────────────────────────────────────────
+
+    // CAD tool updated latexDoc.body → sync textarea
     this.eventBus.on('body-changed', () => this.syncBodyFromModel());
 
-    // Textarea → model → render
+    // User edits → update model → schedule render
     this.preambleArea.addEventListener('input', () => {
       if (this.updatingFromModel) return;
       this.latexDoc.preamble = this.preambleArea.value;
@@ -83,14 +61,14 @@ export class CodePanel {
       this.scheduleRender();
     });
 
-    // Prevent tool shortcuts while typing
+    // Prevent tool shortcuts while typing in textareas
     this.preambleArea.addEventListener('keydown', e => e.stopPropagation());
     this.bodyArea.addEventListener('keydown',    e => e.stopPropagation());
   }
 
-  private makeTextarea(className: string): HTMLTextAreaElement {
+  private makeTextarea(): HTMLTextAreaElement {
     const ta = document.createElement('textarea');
-    ta.className = className;
+    ta.className = 'code-textarea';
     ta.spellcheck = false;
     (ta as any).autocorrect = 'off';
     (ta as any).autocapitalize = 'off';

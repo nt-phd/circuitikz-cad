@@ -1,6 +1,6 @@
-/* ======================================
-   CircuiTikZ CAD - Layout & Styles
-   ====================================== */
+/* ============================================================
+   TikZ CAD — Layout & Styles
+   ============================================================ */
 
 *, *::before, *::after {
   box-sizing: border-box;
@@ -14,31 +14,38 @@ html, body {
   font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
   font-size: 13px;
   color: #222;
-  background: #f5f5f5;
+  background: #f0f0f0;
 }
 
+/* ============================================================
+   APP GRID
+   toolbar | toolbar  | toolbar
+   palette | canvas   | right-panel
+   status  | status   | status
+   ============================================================ */
 #app {
   display: grid;
-  grid-template-columns: 180px 1fr 220px;
-  grid-template-rows: 42px 1fr 180px 24px;
+  grid-template-columns: 200px 1fr 280px;
+  grid-template-rows: 40px 1fr 22px;
   grid-template-areas:
     "toolbar  toolbar  toolbar"
-    "palette  canvas   props"
-    "palette  code     props"
+    "palette  canvas   rpanel"
     "status   status   status";
   height: 100vh;
   width: 100vw;
 }
 
-/* ====== TOOLBAR ====== */
+/* ============================================================
+   TOOLBAR
+   ============================================================ */
 .toolbar {
   grid-area: toolbar;
   display: flex;
   align-items: center;
   gap: 4px;
   padding: 0 8px;
-  background: #fff;
-  border-bottom: 1px solid #ddd;
+  background: #2c2c2c;
+  border-bottom: 1px solid #111;
   user-select: none;
 }
 
@@ -46,52 +53,35 @@ html, body {
   display: flex;
   align-items: center;
   justify-content: center;
-  height: 30px;
-  min-width: 60px;
+  height: 26px;
+  min-width: 56px;
   padding: 0 10px;
-  border: 1px solid #ccc;
-  border-radius: 4px;
-  background: #fafafa;
+  border: 1px solid #555;
+  border-radius: 3px;
+  background: #3c3c3c;
+  color: #ddd;
   cursor: pointer;
   font-size: 12px;
   font-family: inherit;
-  transition: background 0.15s, border-color 0.15s;
+  transition: background 0.12s;
 }
 
-.toolbar button:hover {
-  background: #e8e8e8;
-}
-
-.toolbar button.active {
-  background: #2196F3;
-  color: white;
-  border-color: #1976D2;
-}
+.toolbar button:hover  { background: #4c4c4c; }
+.toolbar button.active { background: #1565C0; color: #fff; border-color: #1976D2; }
 
 .toolbar .separator {
   width: 1px;
-  height: 24px;
-  background: #ddd;
-  margin: 0 6px;
+  height: 20px;
+  background: #555;
+  margin: 0 4px;
 }
 
-.toolbar .style-toggle {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  margin-left: auto;
-  font-size: 12px;
-}
-
-.toolbar .style-toggle button {
-  min-width: 36px;
-  padding: 0 8px;
-}
-
-/* ====== PALETTE ====== */
+/* ============================================================
+   PALETTE (left)
+   ============================================================ */
 .palette {
   grid-area: palette;
-  background: #fff;
+  background: #fafafa;
   border-right: 1px solid #ddd;
   overflow: hidden;
   display: flex;
@@ -108,13 +98,9 @@ html, body {
   font-size: 12px;
   font-family: inherit;
   outline: none;
-  width: calc(100% - 16px);
-  box-sizing: border-box;
+  background: #fff;
 }
-
-.palette-search:focus {
-  border-color: #2196F3;
-}
+.palette-search:focus { border-color: #1565C0; }
 
 .palette-list {
   flex: 1;
@@ -122,37 +108,34 @@ html, body {
 }
 
 .palette .category-title {
-  padding: 8px 10px 4px;
+  padding: 6px 10px 3px;
   font-size: 10px;
-  font-weight: 600;
+  font-weight: 700;
   text-transform: uppercase;
   color: #888;
-  letter-spacing: 0.5px;
+  letter-spacing: 0.6px;
+  background: #f0f0f0;
+  border-top: 1px solid #e0e0e0;
+  position: sticky;
+  top: 0;
+  z-index: 1;
 }
 
 .palette .comp-btn {
   display: flex;
   align-items: center;
   width: 100%;
-  padding: 6px 10px;
+  padding: 5px 10px;
   border: none;
   background: transparent;
   cursor: pointer;
   font-size: 12px;
   font-family: inherit;
   text-align: left;
-  transition: background 0.1s;
+  transition: background 0.08s;
 }
-
-.palette .comp-btn:hover {
-  background: #f0f0f0;
-}
-
-.palette .comp-btn.active {
-  background: #e3f2fd;
-  color: #1565C0;
-  font-weight: 500;
-}
+.palette .comp-btn:hover  { background: #e8f0fe; }
+.palette .comp-btn.active { background: #1565C0; color: #fff; }
 
 .palette .comp-btn .comp-name {
   flex: 1;
@@ -162,15 +145,18 @@ html, body {
 }
 
 .palette .comp-btn .shortcut {
-  margin-left: auto;
+  margin-left: 4px;
   font-size: 10px;
   color: #aaa;
-  padding: 1px 5px;
+  padding: 1px 4px;
   background: #f0f0f0;
-  border-radius: 3px;
+  border-radius: 2px;
 }
+.palette .comp-btn.active .shortcut { background: rgba(255,255,255,0.2); color: #ddd; }
 
-/* ====== CANVAS ====== */
+/* ============================================================
+   CANVAS
+   ============================================================ */
 .canvas-container {
   grid-area: canvas;
   overflow: hidden;
@@ -184,7 +170,7 @@ html, body {
   bottom: 8px;
   left: 8px;
   right: 8px;
-  background: #c62828;
+  background: #c62828ee;
   color: #fff;
   font-family: 'Consolas', monospace;
   font-size: 11px;
@@ -213,13 +199,12 @@ html, body {
   left: 0;
   pointer-events: none;
 }
-
 .latex-layer svg {
   display: block;
   overflow: visible;
 }
 
-/* Overlay SVG: grid + ghost + selection, covers whole canvas */
+/* Overlay SVG: grid + ghost + selection */
 .overlay-layer {
   position: absolute;
   top: 0;
@@ -229,115 +214,173 @@ html, body {
   overflow: visible;
 }
 
-/* ====== PROPERTY PANEL ====== */
-.props {
-  grid-area: props;
-  background: #fff;
-  border-left: 1px solid #ddd;
-  overflow-y: auto;
-  padding: 10px;
-  user-select: none;
-}
-
-.props h3 {
-  font-size: 12px;
-  font-weight: 600;
-  margin-bottom: 10px;
-  color: #555;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-}
-
-.props .prop-group {
-  margin-bottom: 10px;
-}
-
-.props label {
-  display: block;
-  font-size: 11px;
-  color: #777;
-  margin-bottom: 3px;
-}
-
-.props input[type="text"] {
-  width: 100%;
-  padding: 5px 8px;
-  border: 1px solid #ddd;
-  border-radius: 3px;
-  font-size: 12px;
-  font-family: 'Consolas', 'Monaco', monospace;
-}
-
-.props input[type="text"]:focus {
-  outline: none;
-  border-color: #2196F3;
-}
-
-.props select {
-  width: 100%;
-  padding: 5px 8px;
-  border: 1px solid #ddd;
-  border-radius: 3px;
-  font-size: 12px;
-  background: white;
-}
-
-.props .rotation-btns {
-  display: flex;
-  gap: 4px;
-}
-
-.props .rotation-btns button {
-  flex: 1;
-  padding: 4px;
-  border: 1px solid #ddd;
-  border-radius: 3px;
-  background: #fafafa;
-  cursor: pointer;
-  font-size: 11px;
-}
-
-.props .rotation-btns button:hover {
-  background: #e8e8e8;
-}
-
-.props .empty-hint {
-  color: #aaa;
-  font-size: 12px;
-  font-style: italic;
-  text-align: center;
-  margin-top: 40px;
-}
-
-/* ====== CODE PANEL ====== */
-.code-panel {
-  grid-area: code;
+/* ============================================================
+   RIGHT PANEL
+   ============================================================ */
+.right-panel {
+  grid-area: rpanel;
   background: #1e1e1e;
-  color: #d4d4d4;
+  border-left: 1px solid #111;
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  border-top: 1px solid #333;
+  color: #ccc;
 }
 
-.code-panel .code-header {
+/* A collapsible section inside the right panel */
+.rpanel-section {
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+  border-bottom: 1px solid #333;
+  min-height: 0;
+}
+
+/* The section that holds the code editor grows to fill remaining space */
+.rpanel-section--grow {
+  flex: 1;
+  min-height: 80px;
+}
+
+.rpanel-section-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 4px 10px;
+  padding: 5px 10px;
   background: #252526;
-  border-bottom: 1px solid #333;
+  cursor: pointer;
+  user-select: none;
   flex-shrink: 0;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: #999;
+  border-bottom: 1px solid #333;
+}
+.rpanel-section-header:hover { background: #2d2d2d; color: #ccc; }
+.rpanel-chevron { font-size: 9px; }
+
+.rpanel-section-body {
+  overflow-y: auto;
+  flex: 1;
+  min-height: 0;
 }
 
-.code-panel .code-header span {
+.rpanel-section-body--collapsed {
+  display: none;
+}
+
+/* ============================================================
+   PROPERTIES (inside right panel)
+   ============================================================ */
+#props {
+  padding: 8px;
+}
+
+#props h3 {
   font-size: 11px;
-  color: #999;
+  font-weight: 600;
+  margin-bottom: 8px;
+  color: #aaa;
   text-transform: uppercase;
   letter-spacing: 0.5px;
 }
 
-.code-panel .copy-btn {
+#props .prop-group {
+  margin-bottom: 8px;
+}
+
+#props label {
+  display: block;
+  font-size: 10px;
+  color: #777;
+  margin-bottom: 2px;
+}
+
+#props input[type="text"] {
+  width: 100%;
+  padding: 4px 7px;
+  border: 1px solid #444;
+  border-radius: 3px;
+  font-size: 12px;
+  font-family: 'Consolas', 'Monaco', monospace;
+  background: #2d2d2d;
+  color: #ddd;
+}
+#props input[type="text"]:focus {
+  outline: none;
+  border-color: #1976D2;
+}
+
+#props select {
+  width: 100%;
+  padding: 4px 7px;
+  border: 1px solid #444;
+  border-radius: 3px;
+  font-size: 12px;
+  background: #2d2d2d;
+  color: #ddd;
+}
+
+#props .rotation-btns {
+  display: flex;
+  gap: 3px;
+}
+#props .rotation-btns button {
+  flex: 1;
+  padding: 3px;
+  border: 1px solid #444;
+  border-radius: 3px;
+  background: #2d2d2d;
+  color: #ccc;
+  cursor: pointer;
+  font-size: 11px;
+}
+#props .rotation-btns button:hover { background: #3a3a3a; }
+
+#props .empty-hint {
+  color: #555;
+  font-size: 11px;
+  font-style: italic;
+  text-align: center;
+  margin-top: 20px;
+  padding: 0 8px;
+}
+
+/* ============================================================
+   CODE TEXTAREAS (inside right panel)
+   ============================================================ */
+.code-textarea {
+  display: block;
+  width: 100%;
+  height: 100%;
+  padding: 8px 10px;
+  margin: 0;
+  overflow: auto;
+  font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre;
+  tab-size: 2;
+  background: #1e1e1e;
+  color: #d4d4d4;
+  border: none;
+  outline: none;
+  resize: none;
+  box-sizing: border-box;
+}
+
+/* Copy button row above document textarea */
+.code-copy-row {
+  display: flex;
+  justify-content: flex-end;
+  padding: 4px 8px;
+  border-bottom: 1px solid #333;
+  flex-shrink: 0;
+  background: #252526;
+}
+.copy-btn {
   padding: 2px 10px;
   border: 1px solid #555;
   border-radius: 3px;
@@ -345,82 +388,13 @@ html, body {
   color: #ccc;
   cursor: pointer;
   font-size: 11px;
+  font-family: inherit;
 }
+.copy-btn:hover { background: #444; }
 
-.code-panel .copy-btn:hover { background: #444; }
-
-.code-panel pre {
-  flex: 1;
-  margin: 0;
-  padding: 10px;
-  overflow: auto;
-  font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
-  font-size: 12px;
-  line-height: 1.5;
-  white-space: pre;
-  tab-size: 2;
-}
-
-.code-textarea {
-  margin: 0;
-  padding: 10px;
-  overflow: auto;
-  font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
-  font-size: 12px;
-  line-height: 1.5;
-  white-space: pre;
-  tab-size: 2;
-  background: transparent;
-  color: #d4d4d4;
-  border: none;
-  outline: none;
-  resize: none;
-  width: 100%;
-  box-sizing: border-box;
-}
-
-.code-textarea--body {
-  flex: 1;
-  min-height: 0;
-}
-
-.code-textarea--preamble {
-  height: 100%;
-  width: 100%;
-}
-
-/* Section sub-header inside code panel */
-.code-section-header {
-  flex-shrink: 0;
-  padding: 3px 10px;
-  font-size: 10px;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-  color: #777;
-  background: #2a2a2a;
-  border-top: 1px solid #333;
-  cursor: pointer;
-  user-select: none;
-}
-
-.code-section-header:hover {
-  color: #aaa;
-}
-
-/* Collapsible preamble wrapper */
-.code-preamble-wrap {
-  overflow: hidden;
-  transition: max-height 0.2s ease;
-  max-height: 300px;
-  border-bottom: 1px solid #333;
-}
-
-.code-preamble-wrap.collapsed {
-  max-height: 0;
-}
-
-/* ====== STATUS BAR ====== */
+/* ============================================================
+   STATUS BAR
+   ============================================================ */
 .status-bar {
   grid-area: status;
   display: flex;
@@ -432,23 +406,14 @@ html, body {
   font-size: 11px;
   user-select: none;
 }
-
 .status-bar .coord {
   font-family: 'Consolas', monospace;
 }
 
-/* ====== SCROLLBAR ====== */
-::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
-}
-::-webkit-scrollbar-track {
-  background: transparent;
-}
-::-webkit-scrollbar-thumb {
-  background: #ccc;
-  border-radius: 3px;
-}
-::-webkit-scrollbar-thumb:hover {
-  background: #aaa;
-}
+/* ============================================================
+   SCROLLBAR
+   ============================================================ */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: #444; border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: #666; }

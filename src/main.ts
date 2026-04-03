@@ -16,7 +16,22 @@ import { CodePanel } from './ui/CodePanel';
 import { StatusBar } from './ui/StatusBar';
 import type { ToolContext } from './tools/BaseTool';
 
+// ── Right-panel collapsible sections ──────────────────────────────────────────
+function initCollapsibleSections(): void {
+  document.querySelectorAll('.rpanel-section-header').forEach(header => {
+    header.addEventListener('click', () => {
+      const body = header.nextElementSibling as HTMLElement | null;
+      const chevron = header.querySelector('.rpanel-chevron') as HTMLElement | null;
+      if (!body) return;
+      const collapsed = body.classList.toggle('rpanel-section-body--collapsed');
+      if (chevron) chevron.textContent = collapsed ? '▶' : '▼';
+    });
+  });
+}
+
 async function init() {
+  initCollapsibleSections();
+
   await symbolsDB.load('/src/data/symbols.svg');
   populateRegistryFromSymbolsDB(registry, symbolsDB);
 
@@ -41,16 +56,22 @@ async function init() {
   new Toolbar(document.getElementById('toolbar')!, toolManager, eventBus, circuitDoc, latexDoc);
   new ComponentPalette(document.getElementById('palette')!, registry, toolManager, eventBus);
   new PropertyPanel(document.getElementById('props')!, circuitDoc, selection, eventBus, registry);
-  new CodePanel(document.getElementById('code-panel')!, latexDoc, eventBus);
-  const statusBar = new StatusBar(document.getElementById('status-bar')!, canvas.view, toolManager, eventBus);
+
+  new CodePanel(
+    document.getElementById('preamble-panel')!,
+    document.getElementById('document-panel')!,
+    latexDoc,
+    eventBus,
+  );
+
+  const statusBar = new StatusBar(
+    document.getElementById('status-bar')!,
+    canvas.view, toolManager, eventBus,
+  );
 
   /**
-   * CAD tool mutated circuitDoc (component placed, moved, deleted, wire drawn).
-   * → regenerate latexDoc.body from the model
-   * → notify CodePanel to sync its textarea (body-changed)
-   * → compile
-   *
-   * circuitDoc is NOT touched after this point until another CAD action.
+   * CAD tool mutated circuitDoc → regenerate latexDoc.body → sync CodePanel → render.
+   * Does NOT parse body back into circuitDoc (that would overwrite what was just added).
    */
   eventBus.on('document-changed', () => {
     latexDoc.body = emitter.emit(circuitDoc);
@@ -62,10 +83,9 @@ async function init() {
   /**
    * User finished typing in CodePanel (debounced).
    * latexDoc.preamble / latexDoc.body are already up to date.
-   * → just compile — do NOT touch circuitDoc (user is in free-form LaTeX mode)
+   * Just recompile — do NOT touch circuitDoc.
    */
   eventBus.on('user-edited-latex', () => {
-    canvas.refresh();
     canvas.scheduleRender();
   });
 
