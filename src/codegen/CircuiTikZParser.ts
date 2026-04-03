@@ -1,37 +1,28 @@
 /**
- * CircuiTikZParser — parses a \begin{tikzpicture}...\end{tikzpicture} block
- * and reconstructs a CircuitDocument from it.
+ * CircuiTikZParser — parses a tikzpicture body into CircuitDocument.
+ *
+ * Each parsed element stores the line number in the source body so that:
+ *  - IDs are stable across re-parses (based on line index, not random)
+ *  - The CodePanel can highlight the corresponding source line on selection
  *
  * Supported syntax:
  *   \draw (x,y) to[tikzName, opts...] (x2,y2);   → BipoleInstance
  *   \draw (x,y) node[tikzName] {};                → MonopoleInstance
  *   \draw (x,y) -- (x2,y2) -- ...;               → WireInstance
- *
- * Coordinate convention: TikZ uses Y-up → we negate Y when storing in GridPoint.
  */
 
 import type { GridPoint, BipoleInstance, MonopoleInstance, WireInstance, ComponentProps, TerminalMark } from '../types';
 import type { CircuitDocument } from '../model/CircuitDocument';
 import type { ComponentRegistry } from '../definitions/ComponentRegistry';
-import { uid } from '../utils/uid';
 
 // ─── helpers ───────────────────────────────────────────────────────────────
 
-/** Parse "(x,y)" → GridPoint (flipping Y back to screen coords) */
 function parseCoord(s: string): GridPoint | null {
   const m = s.match(/\(\s*([-\d.]+)\s*,\s*([-\d.]+)\s*\)/);
   if (!m) return null;
-  return { x: parseFloat(m[1]), y: -parseFloat(m[2]) }; // flip Y
+  return { x: parseFloat(m[1]), y: -parseFloat(m[2]) };
 }
 
-/** Strip outer $…$ or plain text label */
-function cleanLabel(s: string): string {
-  s = s.trim();
-  if (s.startsWith('$') && s.endsWith('$')) return s; // keep math mode as-is
-  return s;
-}
-
-/** Parse terminal marker string like "*-o", "-*", etc. */
 function parseTerminals(opts: string[]): { startTerminal?: TerminalMark; endTerminal?: TerminalMark } {
   for (const opt of opts) {
     const m = opt.trim().match(/^([*o]?)-([*o]?)$/);
@@ -44,7 +35,6 @@ function parseTerminals(opts: string[]): { startTerminal?: TerminalMark; endTerm
   return {};
 }
 
-/** Extract key=value pairs from options list */
 function extractKV(opts: string[]): Record<string, string> {
   const result: Record<string, string> = {};
   for (const opt of opts) {
@@ -54,9 +44,6 @@ function extractKV(opts: string[]): Record<string, string> {
   return result;
 }
 
-/**
- * Split a to[...] options string by commas, respecting nested braces/brackets.
- */
 function splitOptions(s: string): string[] {
   const parts: string[] = [];
   let depth = 0;
@@ -64,11 +51,7 @@ function splitOptions(s: string): string[] {
   for (const ch of s) {
     if (ch === '{' || ch === '[') depth++;
     else if (ch === '}' || ch === ']') depth--;
-    else if (ch === ',' && depth === 0) {
-      parts.push(cur.trim());
-      cur = '';
-      continue;
-    }
+    else if (ch === ',' && depth === 0) { parts.push(cur.trim()); cur = ''; continue; }
     cur += ch;
   }
   if (cur.trim()) parts.push(cur.trim());
@@ -77,95 +60,109 @@ function splitOptions(s: string): string[] {
 
 // ─── main parser ────────────────────────────────────────────────────────────
 
+/**
+ * Parse the tikzpicture body (or full source) into doc.
+ * Each element's id encodes its source line index so it is stable
+ * across re-parses as long as the source line doesn't change.
+ */
 export function parseCircuiTikZ(
   source: string,
   doc: CircuitDocument,
   registry: ComponentRegistry,
 ): void {
-  // Build a tikzName → defId lookup
   const tikzToDefId = new Map<string, string>();
   for (const def of registry.getAll()) {
-    if (!tikzToDefId.has(def.tikzName)) {
-      tikzToDefId.set(def.tikzName, def.id);
-    }
+    if (!tikzToDefId.has(def.tikzName)) tikzToDefId.set(def.tikzName, def.id);
   }
 
   doc.clear();
 
-  // Normalize: remove comments, strip \begin/\end lines, collapse whitespace
-  const lines = source
-    .split('\n')
-    .map(l => l.replace(/%.*$/, '').trim())
-    .filter(l => l && !/^\\(begin|end)\b/.test(l));
+  const rawLines = source.split('\n');
 
-  // Join into one string, then split on ';' to get individual statements
-  const joined = lines.join(' ');
-  const statements = joined.split(';').map(s => s.trim()).filter(Boolean);
+  // Collect multi-line statements: join continuation until ';'
+  // Track which source line each statement starts on.
+  type Stmt = { text: string; lineIndex: number };
+  const statements: Stmt[] = [];
+  let buf = '';
+  let stmtLine = 0;
 
-  for (const stmt of statements) {
-    // Find \draw anywhere in the statement (handles leading whitespace or stray tokens)
+  for (let i = 0; i < rawLines.length; i++) {
+    const stripped = rawLines[i].replace(/%.*$/, '').trim();
+    if (!stripped || /^\\(begin|end)\b/.test(stripped)) continue;
+
+    if (buf === '') stmtLine = i;
+    buf += (buf ? ' ' : '') + stripped;
+
+    if (buf.includes(';')) {
+      // May have multiple statements on one logical line
+      const parts = buf.split(';');
+      for (let p = 0; p < parts.length - 1; p++) {
+        const t = parts[p].trim();
+        if (t) statements.push({ text: t, lineIndex: stmtLine });
+      }
+      buf = parts[parts.length - 1].trim();
+      if (buf) stmtLine = i;
+    }
+  }
+
+  for (const { text: stmt, lineIndex } of statements) {
     const drawMatch = stmt.match(/\\draw(?:\[.*?\])?\s+(.+)$/s);
     if (!drawMatch) continue;
     const body = drawMatch[1].trim();
 
-    // ── Wire: only contains coordinates and -- ────────────────────────────
-    // e.g. (0,0) -- (2,0) -- (2,-2)
+    // Stable ID = 'line:<lineIndex>'
+    const id = `line:${lineIndex}`;
+
+    // Wire: coords joined by --
     if (/^\(.*\)(\s*--\s*\(.*\))+$/.test(body)) {
-      const coordStrings = body.split('--').map(s => s.trim());
-      const points: GridPoint[] = [];
-      for (const cs of coordStrings) {
-        const pt = parseCoord(cs);
-        if (pt) points.push(pt);
-      }
+      const points: GridPoint[] = body.split('--').map(s => parseCoord(s.trim())).filter(Boolean) as GridPoint[];
       if (points.length >= 2) {
-        const wire: WireInstance = { id: uid(), points, junctions: new Map() };
+        const wire: WireInstance = { id, points, junctions: new Map() };
         doc.addWire(wire);
       }
       continue;
     }
 
-    // ── Monopole / node: (x,y) node[name] {} ─────────────────────────────
-    const nodeMatch = body.match(/^\(([-\d.]+)\s*,\s*([-\d.]+)\)\s+node\[([^\]]+)\]\s*\{\s*\}$/);
+    // Monopole: (x,y) node[name] {}
+    const nodeMatch = body.match(/^\(([-\d.]+)\s*,\s*([-\d.]+)\)\s+node\[([^\]]+)\]\s*\{[^}]*\}$/);
     if (nodeMatch) {
       const position: GridPoint = { x: parseFloat(nodeMatch[1]), y: -parseFloat(nodeMatch[2]) };
-      const tikzName = nodeMatch[3].trim();
-      const defId = tikzToDefId.get(tikzName);
-      if (defId) {
-        const comp: MonopoleInstance = {
-          id: uid(), defId, type: 'monopole',
-          position, rotation: 0, props: {},
-        };
-        doc.addComponent(comp);
-      }
+      const tikzName = nodeMatch[3].trim().split(',')[0].trim();
+      const defId = tikzToDefId.get(tikzName) ?? tikzName;
+      const comp: MonopoleInstance = { id, defId, type: 'monopole', position, rotation: 0, props: {} };
+      doc.addComponent(comp);
       continue;
     }
 
-    // ── Bipole: (x,y) to[opts] (x2,y2) ──────────────────────────────────
+    // Bipole: (x,y) to[opts] (x2,y2)
     const bipoleMatch = body.match(/^(\([-\d.]+\s*,\s*[-\d.]+\))\s+to\[([^\]]+)\]\s+(\([-\d.]+\s*,\s*[-\d.]+\))$/);
     if (bipoleMatch) {
       const start = parseCoord(bipoleMatch[1]);
       const end   = parseCoord(bipoleMatch[3]);
       if (!start || !end) continue;
-
       const rawOpts = splitOptions(bipoleMatch[2]);
       const tikzName = rawOpts[0]?.trim();
-      const defId = tikzToDefId.get(tikzName);
-      if (!defId) continue;
-
+      const defId = tikzToDefId.get(tikzName) ?? tikzName;
       const rest = rawOpts.slice(1);
       const kv = extractKV(rest);
-      const terminals = parseTerminals(rest);
-
       const props: ComponentProps = {
-        ...terminals,
-        label:   kv['l']  ? cleanLabel(kv['l'])  : undefined,
-        voltage: kv['v']  ? cleanLabel(kv['v'])  : undefined,
-        current: kv['i']  ? cleanLabel(kv['i'])  : undefined,
+        ...parseTerminals(rest),
+        label:   kv['l'] ?? undefined,
+        voltage: kv['v'] ?? undefined,
+        current: kv['i'] ?? undefined,
       };
-
-      const comp: BipoleInstance = { id: uid(), defId, type: 'bipole', start, end, props };
+      const comp: BipoleInstance = { id, defId, type: 'bipole', start, end, props };
       doc.addComponent(comp);
       continue;
     }
   }
+}
+
+/**
+ * Return the 0-based line index encoded in an element id like 'line:42'.
+ * Returns -1 if the id is not in that format.
+ */
+export function lineIndexFromId(id: string): number {
+  const m = id.match(/^line:(\d+)$/);
+  return m ? parseInt(m[1], 10) : -1;
 }

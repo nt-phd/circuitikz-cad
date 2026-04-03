@@ -1,13 +1,3 @@
-/**
- * CodePanel — attaches to two separate DOM containers:
- *   preambleParent  — the collapsible Preamble section body
- *   documentParent  — the always-visible Document section body
- *
- * Flow:
- *   CAD tool → document-changed → latexDoc.body updated → body-changed → textarea synced
- *   User edits textarea → latexDoc updated → user-edited-latex → canvas re-renders
- */
-
 import type { LatexDocument } from '../model/LatexDocument';
 import type { EventBus } from '../utils/events';
 
@@ -25,12 +15,12 @@ export class CodePanel {
     private latexDoc: LatexDocument,
     private eventBus: EventBus,
   ) {
-    // ── Preamble textarea ────────────────────────────────────────────────
+    // Preamble textarea
     this.preambleArea = this.makeTextarea();
     this.preambleArea.value = this.latexDoc.preamble;
     preambleParent.appendChild(this.preambleArea);
 
-    // ── Document textarea + copy button ──────────────────────────────────
+    // Document: copy button + textarea
     const copyRow = document.createElement('div');
     copyRow.className = 'code-copy-row';
     const copyBtn = document.createElement('button');
@@ -43,8 +33,6 @@ export class CodePanel {
     this.bodyArea = this.makeTextarea();
     this.bodyArea.value = this.latexDoc.body;
     documentParent.appendChild(this.bodyArea);
-
-    // ── Events ───────────────────────────────────────────────────────────
 
     // CAD tool updated latexDoc.body → sync textarea
     this.eventBus.on('body-changed', () => this.syncBodyFromModel());
@@ -61,10 +49,53 @@ export class CodePanel {
       this.scheduleRender();
     });
 
-    // Prevent tool shortcuts while typing in textareas
+    // Prevent tool shortcuts while typing
     this.preambleArea.addEventListener('keydown', e => e.stopPropagation());
     this.bodyArea.addEventListener('keydown',    e => e.stopPropagation());
+
+    // Clicking in the body textarea clears canvas selection
+    this.bodyArea.addEventListener('click', () => {
+      this.eventBus.emit({ type: 'selection-changed', selectedIds: [] });
+    });
   }
+
+  // ── Public API ────────────────────────────────────────────────────────────
+
+  /**
+   * Highlight the line at the given 0-based index in the body textarea.
+   * Scrolls the line into view and selects it.
+   */
+  highlightLine(lineIndex: number): void {
+    const text = this.bodyArea.value;
+    const lines = text.split('\n');
+    if (lineIndex < 0 || lineIndex >= lines.length) return;
+
+    let start = 0;
+    for (let i = 0; i < lineIndex; i++) start += lines[i].length + 1;
+    const end = start + lines[lineIndex].length;
+
+    this.bodyArea.focus({ preventScroll: true });
+    this.bodyArea.setSelectionRange(start, end);
+
+    // Scroll line into view
+    const lineHeight = parseFloat(getComputedStyle(this.bodyArea).lineHeight) || 18;
+    this.bodyArea.scrollTop = Math.max(0, lineIndex * lineHeight - this.bodyArea.clientHeight / 2);
+  }
+
+  /**
+   * Replace the line at lineIndex with newText, then re-render.
+   * Used by PropertyPanel to update a component's source line.
+   */
+  replaceLine(lineIndex: number, newText: string): void {
+    const lines = this.latexDoc.body.split('\n');
+    if (lineIndex < 0 || lineIndex >= lines.length) return;
+    lines[lineIndex] = newText;
+    this.latexDoc.body = lines.join('\n');
+    this.syncBodyFromModel();
+    this.scheduleRender();
+  }
+
+  // ── Internal ──────────────────────────────────────────────────────────────
 
   private makeTextarea(): HTMLTextAreaElement {
     const ta = document.createElement('textarea');

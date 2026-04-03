@@ -13,7 +13,7 @@ import { ComponentPalette } from './ui/ComponentPalette';
 import { PropertyPanel } from './ui/PropertyPanel';
 import { CodePanel } from './ui/CodePanel';
 import { StatusBar } from './ui/StatusBar';
-import { parseCircuiTikZ } from './codegen/CircuiTikZParser';
+import { parseCircuiTikZ, lineIndexFromId } from './codegen/CircuiTikZParser';
 import type { ToolContext } from './tools/BaseTool';
 
 function initCollapsibleSections(): void {
@@ -28,7 +28,6 @@ function initCollapsibleSections(): void {
   });
 }
 
-/** Insert a line just before \end{tikzpicture} in the body. */
 function appendLineToBody(body: string, line: string): string {
   const marker = '\\end{tikzpicture}';
   const idx = body.lastIndexOf(marker);
@@ -55,12 +54,10 @@ async function init() {
     hitTester: canvas.hitTester,
     emit: (e) => eventBus.emit(e),
     getDocument: () => circuitDoc,
-
-    /** Append a LaTeX line to the body and trigger render. */
     appendLine: (line: string) => {
       latexDoc.body = appendLineToBody(latexDoc.body, line);
-      eventBus.emit({ type: 'body-changed' });   // sync textarea
-      parseCircuiTikZ(latexDoc.body, circuitDoc, registry); // keep hit-test in sync
+      parseCircuiTikZ(latexDoc.body, circuitDoc, registry);
+      eventBus.emit({ type: 'body-changed' });
       canvas.refresh();
       canvas.scheduleRender();
     },
@@ -70,35 +67,43 @@ async function init() {
 
   new Toolbar(document.getElementById('toolbar')!, toolManager, eventBus, circuitDoc, latexDoc);
   new ComponentPalette(document.getElementById('palette')!, registry, toolManager, eventBus);
-  new PropertyPanel(document.getElementById('props')!, circuitDoc, selection, eventBus, registry);
 
-  new CodePanel(
+  const propPanel = new PropertyPanel(
+    document.getElementById('props')!,
+    circuitDoc, selection, eventBus, registry,
+  );
+
+  const codePanel = new CodePanel(
     document.getElementById('preamble-panel')!,
     document.getElementById('document-panel')!,
-    latexDoc,
-    eventBus,
+    latexDoc, eventBus,
   );
+
+  propPanel.setCodePanel(codePanel, latexDoc);
 
   const statusBar = new StatusBar(
     document.getElementById('status-bar')!,
     canvas.view, toolManager, eventBus,
   );
 
-  /**
-   * document-changed: emitted by SelectTool (drag) and DeleteTool.
-   * These still modify circuitDoc directly, so we re-parse and re-render.
-   * NOTE: for these tools we do NOT regenerate the body from the model —
-   * drag/delete on parsed components is a best-effort feature.
-   */
+  // Selection changed → highlight line in CodePanel
+  eventBus.on('selection-changed', (e) => {
+    if (e.type !== 'selection-changed') return;
+    canvas.refresh(); // redraw selection overlay
+
+    const ids = e.selectedIds;
+    if (ids.length !== 1) return;
+    const lineIdx = lineIndexFromId(ids[0]);
+    if (lineIdx >= 0) codePanel.highlightLine(lineIdx);
+  });
+
+  // document-changed: SelectTool drag completed or Delete
   eventBus.on('document-changed', () => {
     canvas.refresh();
     canvas.scheduleRender();
   });
 
-  /**
-   * user-edited-latex: user finished typing in the Document or Preamble textarea.
-   * Re-parse body into circuitDoc and recompile.
-   */
+  // user-edited-latex: user typed in textarea
   eventBus.on('user-edited-latex', () => {
     parseCircuiTikZ(latexDoc.body, circuitDoc, registry);
     selection.clear();
@@ -106,7 +111,6 @@ async function init() {
     canvas.scheduleRender();
   });
 
-  // Populate circuitDoc from the default body at startup.
   parseCircuiTikZ(latexDoc.body, circuitDoc, registry);
 
   canvas.overlaySvg.addEventListener('mousemove', (e) => {
@@ -114,7 +118,6 @@ async function init() {
   });
 
   window.addEventListener('resize', () => canvas.refresh());
-
   canvas.scheduleRender();
 }
 

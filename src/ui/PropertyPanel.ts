@@ -1,11 +1,18 @@
-import type { ComponentInstance, ComponentProps, TerminalMark, Rotation, MonopoleInstance } from '../types';
+import type { ComponentInstance, ComponentProps, TerminalMark, Rotation, MonopoleInstance, BipoleInstance } from '../types';
 import type { CircuitDocument } from '../model/CircuitDocument';
 import type { SelectionState } from '../model/SelectionState';
 import type { EventBus } from '../utils/events';
 import type { ComponentRegistry } from '../definitions/ComponentRegistry';
+import type { CodePanel } from './CodePanel';
+import type { LatexDocument } from '../model/LatexDocument';
+import { lineIndexFromId } from '../codegen/CircuiTikZParser';
+import { formatCoord } from '../codegen/CoordFormatter';
+import { formatLabel } from '../codegen/LabelFormatter';
 
 export class PropertyPanel {
   private container: HTMLElement;
+  private codePanel: CodePanel | null = null;
+  private latexDoc: LatexDocument | null = null;
 
   constructor(
     parent: HTMLElement,
@@ -20,83 +27,102 @@ export class PropertyPanel {
     this.eventBus.on('document-changed',  () => this.render());
   }
 
+  /** Wire up CodePanel and LatexDocument after construction. */
+  setCodePanel(cp: CodePanel, ld: LatexDocument): void {
+    this.codePanel = cp;
+    this.latexDoc = ld;
+  }
+
   private render(): void {
     this.container.innerHTML = '';
-
     const ids = this.selection.getSelectedIds();
-    if (ids.length === 0) {
-      this.hint('Select a component to edit its properties');
-      return;
-    }
-    if (ids.length > 1) {
-      this.hint(`${ids.length} elements selected`);
-      return;
-    }
 
-    const comp = this.doc.getComponent(ids[0]);
+    if (ids.length === 0) { this.hint('Select a component to edit its properties'); return; }
+    if (ids.length > 1)   { this.hint(`${ids.length} elements selected`); return; }
+
+    const id = ids[0];
+    const comp = this.doc.getComponent(id);
     if (!comp) {
-      const wire = this.doc.getWire(ids[0]);
-      if (wire) this.renderWireProps(wire.id);
+      const wire = this.doc.getWire(id);
+      if (wire) { this.hint('Wire — edit in Document panel'); }
       return;
     }
     this.renderComponentProps(comp);
+  }
+
+  private renderComponentProps(comp: ComponentInstance): void {
+    const def = this.registry.get(comp.defId);
+    const lineIdx = lineIndexFromId(comp.id);
+
+    const h3 = document.createElement('h3');
+    h3.textContent = def?.displayName ?? comp.defId;
+    this.container.appendChild(h3);
+
+    // Helper: when a prop changes, rebuild the source line and replace it
+    const onPropChange = () => {
+      if (lineIdx < 0 || !this.latexDoc || !this.codePanel) return;
+      const newLine = this.buildSourceLine(comp);
+      if (newLine) this.codePanel.replaceLine(lineIdx, newLine);
+    };
+
+    this.addTextInput('Label', comp.props.label ?? '', (val) => {
+      comp.props.label = val || undefined;
+      onPropChange();
+    });
+    this.addTextInput('Value', comp.props.value ?? '', (val) => {
+      comp.props.value = val || undefined;
+      onPropChange();
+    });
+    this.addTextInput('Voltage (v=)', comp.props.voltage ?? '', (val) => {
+      comp.props.voltage = val || undefined;
+      onPropChange();
+    });
+    this.addTextInput('Current (i=)', comp.props.current ?? '', (val) => {
+      comp.props.current = val || undefined;
+      onPropChange();
+    });
+
+    if (comp.type === 'bipole') {
+      this.addTerminalSelect('Start terminal', comp.props.startTerminal ?? 'none', (val) => {
+        comp.props.startTerminal = val;
+        onPropChange();
+      });
+      this.addTerminalSelect('End terminal', comp.props.endTerminal ?? 'none', (val) => {
+        comp.props.endTerminal = val;
+        onPropChange();
+      });
+    }
+
+    if (comp.type === 'monopole') {
+      this.addRotationButtons(comp as MonopoleInstance, onPropChange);
+    }
+  }
+
+  /** Reconstruct the LaTeX source line from a component's current props. */
+  private buildSourceLine(comp: ComponentInstance): string | null {
+    if (comp.type === 'bipole') {
+      const b = comp as BipoleInstance;
+      const opts: string[] = [comp.defId];
+      const ts = b.props.startTerminal === 'dot' ? '*' : b.props.startTerminal === 'open' ? 'o' : '';
+      const te = b.props.endTerminal   === 'dot' ? '*' : b.props.endTerminal   === 'open' ? 'o' : '';
+      const term = `${ts}-${te}`;
+      if (term !== '-') opts.push(term);
+      if (b.props.label)   opts.push(`l=${formatLabel(b.props.label)}`);
+      if (b.props.voltage) opts.push(`v=${formatLabel(b.props.voltage)}`);
+      if (b.props.current) opts.push(`i=${formatLabel(b.props.current)}`);
+      return `  \\draw ${formatCoord(b.start)} to[${opts.join(', ')}] ${formatCoord(b.end)};`;
+    }
+    if (comp.type === 'monopole') {
+      const m = comp as MonopoleInstance;
+      return `  \\draw ${formatCoord(m.position)} node[${comp.defId}] {};`;
+    }
+    return null;
   }
 
   private hint(text: string): void {
     const div = document.createElement('div');
     div.className = 'empty-hint';
     div.textContent = text;
-    this.container.appendChild(div);
-  }
-
-  private renderComponentProps(comp: ComponentInstance): void {
-    const def = this.registry.get(comp.defId);
-
-    const h3 = document.createElement('h3');
-    h3.textContent = def?.displayName ?? comp.defId;
-    this.container.appendChild(h3);
-
-    this.addTextInput('Label', comp.props.label ?? '', (val) => {
-      comp.props.label = val;
-      this.eventBus.emit({ type: 'component-props-changed', id: comp.id, props: { label: val } });
-    });
-    this.addTextInput('Value', comp.props.value ?? '', (val) => {
-      comp.props.value = val;
-      this.eventBus.emit({ type: 'component-props-changed', id: comp.id, props: { value: val } });
-    });
-    this.addTextInput('Voltage (v=)', comp.props.voltage ?? '', (val) => {
-      comp.props.voltage = val;
-      this.eventBus.emit({ type: 'component-props-changed', id: comp.id, props: { voltage: val } });
-    });
-    this.addTextInput('Current (i=)', comp.props.current ?? '', (val) => {
-      comp.props.current = val;
-      this.eventBus.emit({ type: 'component-props-changed', id: comp.id, props: { current: val } });
-    });
-
-    if (comp.type === 'bipole') {
-      this.addTerminalSelect('Start terminal', comp.props.startTerminal ?? 'none', (val) => {
-        comp.props.startTerminal = val;
-        this.eventBus.emit({ type: 'component-props-changed', id: comp.id, props: { startTerminal: val } });
-      });
-      this.addTerminalSelect('End terminal', comp.props.endTerminal ?? 'none', (val) => {
-        comp.props.endTerminal = val;
-        this.eventBus.emit({ type: 'component-props-changed', id: comp.id, props: { endTerminal: val } });
-      });
-    }
-
-    if (comp.type === 'monopole') {
-      this.addRotationButtons(comp as MonopoleInstance);
-    }
-  }
-
-  private renderWireProps(wireId: string): void {
-    const h3 = document.createElement('h3');
-    h3.textContent = 'Wire';
-    this.container.appendChild(h3);
-    const div = document.createElement('div');
-    div.className = 'empty-hint';
-    div.style.marginTop = '10px';
-    div.textContent = `ID: ${wireId}`;
     this.container.appendChild(div);
   }
 
@@ -110,7 +136,7 @@ export class PropertyPanel {
     input.type = 'text';
     input.value = value;
     input.placeholder = label === 'Label' ? '$R_1$' : '';
-    input.addEventListener('input', () => onChange(input.value));
+    input.addEventListener('change', () => onChange(input.value));
     group.appendChild(input);
     this.container.appendChild(group);
   }
@@ -122,14 +148,9 @@ export class PropertyPanel {
     lbl.textContent = label;
     group.appendChild(lbl);
     const select = document.createElement('select');
-    const options: [TerminalMark, string][] = [
-      ['none', 'None (-)'], ['dot', 'Dot (*)'], ['open', 'Open (o)'],
-    ];
-    for (const [val, text] of options) {
+    for (const [val, text] of [['none','None (-)'],['dot','Dot (*)'],['open','Open (o)']] as [TerminalMark, string][]) {
       const opt = document.createElement('option');
-      opt.value = val;
-      opt.textContent = text;
-      opt.selected = val === value;
+      opt.value = val; opt.textContent = text; opt.selected = val === value;
       select.appendChild(opt);
     }
     select.addEventListener('change', () => onChange(select.value as TerminalMark));
@@ -137,7 +158,7 @@ export class PropertyPanel {
     this.container.appendChild(group);
   }
 
-  private addRotationButtons(comp: MonopoleInstance): void {
+  private addRotationButtons(comp: MonopoleInstance, onPropChange: () => void): void {
     const group = document.createElement('div');
     group.className = 'prop-group';
     const lbl = document.createElement('label');
@@ -151,7 +172,7 @@ export class PropertyPanel {
       if (comp.rotation === rot) btn.style.fontWeight = 'bold';
       btn.addEventListener('click', () => {
         comp.rotation = rot;
-        this.eventBus.emit({ type: 'document-changed' });
+        onPropChange();
       });
       btnsDiv.appendChild(btn);
     }
