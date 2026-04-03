@@ -1,5 +1,5 @@
-import { useEffect, useLayoutEffect, useMemo, useState } from 'react';
-import type { ReactNode } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import type { ReactNode, RefObject } from 'react';
 import { initImperativeApp, type ImperativeAppHandle } from './initImperativeApp';
 import { lineIndexFromId } from './codegen/CircuiTikZParser';
 import { formatCoord } from './codegen/CoordFormatter';
@@ -322,6 +322,7 @@ function useCodeEditors(handle: ImperativeAppHandle | null) {
   const [preamble, setPreamble] = useState('');
   const [body, setBody] = useState('');
   const [copyLabel, setCopyLabel] = useState('Copy');
+  const documentTextareaRef = useRef<HTMLTextAreaElement | null>(null);
 
   useEffect(() => {
     if (!handle) return;
@@ -340,7 +341,7 @@ function useCodeEditors(handle: ImperativeAppHandle | null) {
       if (event.selectedIds.length !== 1) return;
       const lineIndex = lineIndexFromId(event.selectedIds[0]);
       if (lineIndex < 0) return;
-      const textarea = document.querySelector('#document-panel textarea') as HTMLTextAreaElement | null;
+      const textarea = documentTextareaRef.current;
       if (!textarea) return;
       const lines = textarea.value.split('\n');
       if (lineIndex >= lines.length) return;
@@ -397,6 +398,7 @@ function useCodeEditors(handle: ImperativeAppHandle | null) {
   return {
     body,
     copyLabel,
+    documentTextareaRef,
     emitCaretSelection,
     onCopy,
     preamble,
@@ -431,6 +433,7 @@ function PreambleEditor({
 function DocumentEditor({
   body,
   copyLabel,
+  documentTextareaRef,
   emitCaretSelection,
   onCopy,
   setBody,
@@ -438,6 +441,7 @@ function DocumentEditor({
 }: {
   body: string;
   copyLabel: string;
+  documentTextareaRef: RefObject<HTMLTextAreaElement | null>;
   emitCaretSelection: (e: ChangeEvent<HTMLTextAreaElement> | SyntheticEvent<HTMLTextAreaElement>) => void;
   onCopy: () => Promise<void>;
   setBody: (value: string) => void;
@@ -450,6 +454,7 @@ function DocumentEditor({
       </div>
       <textarea
         className="code-textarea"
+        ref={documentTextareaRef}
         onChange={(e) => {
           setBody(e.target.value);
           emitCaretSelection(e);
@@ -465,6 +470,22 @@ function DocumentEditor({
       />
     </div>
   );
+}
+
+function CanvasViewport({
+  onReady,
+}: {
+  onReady: (handle: ImperativeAppHandle) => void;
+}) {
+  const containerRef = useRef<HTMLDivElement | null>(null);
+
+  useLayoutEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+    void initImperativeApp(container).then(onReady);
+  }, [onReady]);
+
+  return <div ref={containerRef} id="canvas-container" className="canvas-container" />;
 }
 
 function StatusBarView({ handle, currentTool }: { handle: ImperativeAppHandle | null; currentTool: ToolType }) {
@@ -509,10 +530,6 @@ export function App() {
     document: false,
   });
   const codeEditors = useCodeEditors(handle);
-
-  useLayoutEffect(() => {
-    void initImperativeApp().then(setHandle);
-  }, []);
 
   useEffect(() => {
     if (!handle) return;
@@ -570,6 +587,7 @@ export function App() {
           <DocumentEditor
             body={codeEditors.body}
             copyLabel={codeEditors.copyLabel}
+            documentTextareaRef={codeEditors.documentTextareaRef}
             emitCaretSelection={codeEditors.emitCaretSelection}
             onCopy={codeEditors.onCopy}
             setBody={codeEditors.setBody}
@@ -578,7 +596,7 @@ export function App() {
         </Section>
       </div>
 
-      <div id="canvas-container" className="canvas-container" />
+      <CanvasViewport onReady={setHandle} />
       <StatusBarView currentTool={currentTool} handle={handle} />
     </>
   );

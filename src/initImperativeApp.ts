@@ -19,18 +19,6 @@ import type { ToolContext } from './tools/BaseTool';
 let initialized = false;
 let initPromise: Promise<ImperativeAppHandle> | null = null;
 
-function initCollapsibleSections(): void {
-  document.querySelectorAll('.rpanel-section-header').forEach((header) => {
-    header.addEventListener('click', () => {
-      const sectionBody = header.nextElementSibling as HTMLElement | null;
-      const chevron = header.querySelector('.rpanel-chevron') as HTMLElement | null;
-      if (!sectionBody) return;
-      const collapsed = sectionBody.classList.toggle('rpanel-section-body--collapsed');
-      if (chevron) chevron.textContent = collapsed ? '▶' : '▼';
-    });
-  });
-}
-
 function appendLineToBody(body: string, line: string): string {
   const marker = '\\end{tikzpicture}';
   const idx = body.lastIndexOf(marker);
@@ -94,7 +82,7 @@ export interface ImperativeAppHandle {
   clearDocument: () => void;
 }
 
-async function createImperativeApp(): Promise<ImperativeAppHandle> {
+async function createImperativeApp(canvasContainer: HTMLElement): Promise<ImperativeAppHandle> {
   if (initialized) throw new Error('Imperative app already initialized');
   initialized = true;
 
@@ -106,7 +94,6 @@ async function createImperativeApp(): Promise<ImperativeAppHandle> {
   const selection = new SelectionState();
   const eventBus = new EventBus();
 
-  const canvasContainer = document.getElementById('canvas-container')!;
   const canvas = new LatexCanvas(canvasContainer, latexDoc, circuitDoc, registry, selection);
 
   const syncTikzScale = () => {
@@ -206,9 +193,9 @@ async function createImperativeApp(): Promise<ImperativeAppHandle> {
   };
 }
 
-export function initImperativeApp(): Promise<ImperativeAppHandle> {
+export function initImperativeApp(canvasContainer: HTMLElement): Promise<ImperativeAppHandle> {
   if (!initPromise) {
-    initPromise = createImperativeApp();
+    initPromise = createImperativeApp(canvasContainer);
   }
   return initPromise;
 }
