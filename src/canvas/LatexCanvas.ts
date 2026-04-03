@@ -198,71 +198,49 @@ export class LatexCanvas {
   private buildGrid(): void {
     const defs = createSvgElement('defs') as SVGDefsElement;
 
+    // The overlay is inside worldDiv which already applies pan+zoom via CSS transform.
+    // So grid patterns use fixed GRID_SIZE coordinates — no scaling or pan offset needed.
+    const majorSize = GRID_SIZE * MAJOR_GRID_EVERY;
+
     this.patternMinor = createSvgElement('pattern', {
       id: 'lc-grid-minor', patternUnits: 'userSpaceOnUse',
-      width: GRID_SIZE, height: GRID_SIZE,
+      x: 0, y: 0, width: GRID_SIZE, height: GRID_SIZE,
     }) as SVGPatternElement;
-    const minorPath = createSvgElement('path', {
+    this.patternMinor.appendChild(createSvgElement('path', {
       d: `M ${GRID_SIZE} 0 L 0 0 0 ${GRID_SIZE}`,
       fill: 'none', stroke: GRID_COLOR_MINOR, 'stroke-width': '0.5',
-    });
-    this.patternMinor.appendChild(minorPath);
+    }));
     defs.appendChild(this.patternMinor);
 
-    const majorSize = GRID_SIZE * MAJOR_GRID_EVERY;
     this.patternMajor = createSvgElement('pattern', {
       id: 'lc-grid-major', patternUnits: 'userSpaceOnUse',
-      width: majorSize, height: majorSize,
+      x: 0, y: 0, width: majorSize, height: majorSize,
     }) as SVGPatternElement;
-    const minorFill = createSvgElement('rect', {
+    this.patternMajor.appendChild(createSvgElement('rect', {
       x: 0, y: 0, width: majorSize, height: majorSize,
       fill: 'url(#lc-grid-minor)',
-    });
-    this.patternMajor.appendChild(minorFill);
-    const majorPath = createSvgElement('path', {
+    }));
+    this.patternMajor.appendChild(createSvgElement('path', {
       d: `M ${majorSize} 0 L 0 0 0 ${majorSize}`,
       fill: 'none', stroke: GRID_COLOR_MAJOR, 'stroke-width': '1',
-    });
-    this.patternMajor.appendChild(majorPath);
+    }));
     defs.appendChild(this.patternMajor);
 
     this.overlaySvg.appendChild(defs);
 
+    // Cover a large area in world coordinates so the grid is always visible
+    // regardless of pan. The CSS transform handles the actual viewport mapping.
+    const BIG = 20000;
     this.gridRect = createSvgElement('rect', {
-      x: 0, y: 0, width: 1, height: 1, fill: 'url(#lc-grid-major)',
+      x: -BIG, y: -BIG, width: BIG * 2, height: BIG * 2,
+      fill: 'url(#lc-grid-major)',
     }) as SVGRectElement;
-    // Insert before ghost/selection groups
     this.overlaySvg.insertBefore(this.gridRect, this.overlaySvg.firstChild);
   }
 
-  private updateGrid(): void {
-    const rect = this.container.getBoundingClientRect();
-    const w = rect.width;
-    const h = rect.height;
-
-    const cellSize = GRID_SIZE * this.view.zoom;
-    const majorSize = cellSize * MAJOR_GRID_EVERY;
-
-    setAttrs(this.patternMinor, {
-      width: cellSize, height: cellSize,
-      x: this.view.panX % cellSize,
-      y: this.view.panY % cellSize,
-    });
-    const minorPath = this.patternMinor.querySelector('path')!;
-    setAttrs(minorPath, { d: `M ${cellSize} 0 L 0 0 0 ${cellSize}` });
-
-    setAttrs(this.patternMajor, {
-      width: majorSize, height: majorSize,
-      x: this.view.panX % majorSize,
-      y: this.view.panY % majorSize,
-    });
-    const majorFill = this.patternMajor.querySelector('rect')!;
-    setAttrs(majorFill, { width: majorSize, height: majorSize });
-    const majorPath = this.patternMajor.querySelector('path')!;
-    setAttrs(majorPath, { d: `M ${majorSize} 0 L 0 0 0 ${majorSize}` });
-
-    setAttrs(this.gridRect, { width: w, height: h });
-  }
+  // Grid is static in world coords — CSS transform handles pan/zoom.
+  // This method is kept for resize events that need to refresh other elements.
+  private updateGrid(): void {}
 
   // ====== PAN/ZOOM ======
 
