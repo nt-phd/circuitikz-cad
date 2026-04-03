@@ -13,7 +13,7 @@ import { extractTikzScale, scaleState } from './canvas/ScaleState';
 import { formatCoord } from './codegen/CoordFormatter';
 import { formatLabel } from './codegen/LabelFormatter';
 import { DEFAULT_BODY } from './model/LatexDocument';
-import type { ComponentInstance, WireInstance, TerminalMark } from './types';
+import type { ComponentInstance, WireInstance, TerminalMark, ToolType } from './types';
 import type { ToolContext } from './tools/BaseTool';
 
 let initialized = false;
@@ -79,6 +79,15 @@ export interface ImperativeAppHandle {
   registry: typeof registry;
   selection: SelectionState;
   toolManager: ToolManager;
+  getCurrentTool: () => { tool: ToolType; defId?: string };
+  getSelectedIds: () => string[];
+  getFullLatexSource: () => string;
+  setTool: (tool: ToolType, defId?: string) => void;
+  setSelectedIds: (selectedIds: string[], source?: 'canvas' | 'code' | 'programmatic') => void;
+  setPreamble: (preamble: string) => void;
+  setBody: (body: string) => void;
+  commitLatexEdits: () => void;
+  commitDocumentChange: () => void;
   clearDocument: () => void;
 }
 
@@ -184,6 +193,25 @@ async function createImperativeApp(canvasContainer: HTMLElement): Promise<Impera
     registry,
     selection,
     toolManager,
+    getCurrentTool: () => ({ tool: toolManager.currentType, defId: toolManager.currentDefId }),
+    getSelectedIds: () => selection.getSelectedIds(),
+    getFullLatexSource: () => latexDoc.toFullSource(),
+    setTool: (tool, defId) => toolManager.setTool(tool, defId),
+    setSelectedIds: (selectedIds, source = 'programmatic') => {
+      eventBus.emit({ type: 'selection-changed', selectedIds, source });
+    },
+    setPreamble: (preamble) => {
+      latexDoc.preamble = preamble;
+    },
+    setBody: (body) => {
+      latexDoc.body = body;
+    },
+    commitLatexEdits: () => {
+      eventBus.emit({ type: 'user-edited-latex' });
+    },
+    commitDocumentChange: () => {
+      eventBus.emit({ type: 'document-changed' });
+    },
     clearDocument: () => {
       circuitDoc.clear();
       latexDoc.body = DEFAULT_BODY;

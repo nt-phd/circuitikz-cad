@@ -70,11 +70,13 @@ function Section({
 }
 
 function ToolbarView({
-  handle,
   currentTool,
+  onSelectTool,
+  onClear,
 }: {
-  handle: ImperativeAppHandle | null;
   currentTool: ToolType;
+  onSelectTool: (tool: ToolType) => void;
+  onClear: () => void;
 }) {
   return (
     <div className="toolbar">
@@ -82,14 +84,14 @@ function ToolbarView({
         <button
           key={id}
           className={currentTool === id ? 'active' : ''}
-          onClick={() => handle?.toolManager.setTool(id)}
+          onClick={() => onSelectTool(id)}
           type="button"
         >
           {label}
         </button>
       ))}
       <div className="separator" />
-      <button onClick={() => handle?.clearDocument()} type="button">Clear</button>
+      <button onClick={onClear} type="button">Clear</button>
     </div>
   );
 }
@@ -97,9 +99,11 @@ function ToolbarView({
 function LibraryView({
   handle,
   currentDefId,
+  onSelectTool,
 }: {
   handle: ImperativeAppHandle | null;
   currentDefId?: string;
+  onSelectTool: (tool: ToolType, defId?: string) => void;
 }) {
   const [query, setQuery] = useState('');
   const defs = useMemo(() => handle?.registry.getAll() ?? [], [handle]);
@@ -116,19 +120,19 @@ function LibraryView({
       for (const def of defs) {
         if (def.shortcut === key) {
           e.preventDefault();
-          handle.toolManager.setTool(toolForDef(def), def.id);
+          onSelectTool(toolForDef(def), def.id);
           return;
         }
       }
       if (key === 'w') {
         e.preventDefault();
-        handle.toolManager.setTool('wire');
+        onSelectTool('wire');
       }
     };
 
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [defs, handle]);
+  }, [defs, handle, onSelectTool]);
 
   const filtered = query
     ? defs.filter((def) =>
@@ -168,7 +172,7 @@ function LibraryView({
               <button
                 key={def.id}
                 className={`comp-btn${currentDefId === def.id ? ' active' : ''}`}
-                onClick={() => handle?.toolManager.setTool(toolForDef(def), def.id)}
+                onClick={() => onSelectTool(toolForDef(def), def.id)}
                 type="button"
               >
                 <span className="comp-name">{def.displayName}</span>
@@ -218,7 +222,7 @@ function PropertiesView({
 
   const updateComponent = (updater: () => void) => {
     updater();
-    handle.eventBus.emit({ type: 'document-changed' });
+    handle.commitDocumentChange();
   };
 
   return (
@@ -339,20 +343,53 @@ function PropertiesView({
   );
 }
 
-function useCodeEditors(handle: ImperativeAppHandle | null) {
+function useAppState(handle: ImperativeAppHandle | null) {
   const [preamble, setPreamble] = useState('');
   const [body, setBody] = useState('');
   const [copyLabel, setCopyLabel] = useState('Copy');
+  const [currentTool, setCurrentTool] = useState<ToolType>('select');
+  const [currentDefId, setCurrentDefId] = useState<string | undefined>(undefined);
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [documentVersion, setDocumentVersion] = useState(0);
   const documentTextareaRef = useRef<HTMLTextAreaElement | null>(null);
 
   useEffect(() => {
     if (!handle) return;
+    const currentToolState = handle.getCurrentTool();
+    setCurrentTool(currentToolState.tool);
+    setCurrentDefId(currentToolState.defId);
+    setSelectedIds(handle.getSelectedIds());
     setPreamble(handle.latexDoc.preamble);
     setBody(handle.latexDoc.body);
-    const unsub = handle.eventBus.on('body-changed', () => {
+
+    const unsubBody = handle.eventBus.on('body-changed', () => {
       setBody(handle.latexDoc.body);
+      setDocumentVersion((version) => version + 1);
     });
-    return unsub;
+    const unsubTool = handle.eventBus.on('tool-changed', (event) => {
+      if (event.type !== 'tool-changed') return;
+      setCurrentTool(event.tool);
+      setCurrentDefId(event.defId);
+    });
+    const unsubSelection = handle.eventBus.on('selection-changed', (event) => {
+      if (event.type !== 'selection-changed') return;
+      setSelectedIds(event.selectedIds);
+    });
+    const unsubDocument = handle.eventBus.on('document-changed', () => {
+      setDocumentVersion((version) => version + 1);
+    });
+    const unsubEdited = handle.eventBus.on('user-edited-latex', () => {
+      setSelectedIds(handle.getSelectedIds());
+      setBody(handle.latexDoc.body);
+      setDocumentVersion((version) => version + 1);
+    });
+    return () => {
+      unsubBody();
+      unsubTool();
+      unsubSelection();
+      unsubDocument();
+      unsubEdited();
+    };
   }, [handle]);
 
   useEffect(() => {
@@ -379,18 +416,18 @@ function useCodeEditors(handle: ImperativeAppHandle | null) {
 
   useEffect(() => {
     if (!handle) return;
-    handle.latexDoc.preamble = preamble;
+    handle.setPreamble(preamble);
   }, [handle, preamble]);
 
   useEffect(() => {
     if (!handle) return;
-    handle.latexDoc.body = body;
+    handle.setBody(body);
   }, [body, handle]);
 
   useEffect(() => {
     if (!handle) return;
     const timer = window.setTimeout(() => {
-      handle.eventBus.emit({ type: 'user-edited-latex' });
+      handle.commitLatexEdits();
     }, 600);
     return () => window.clearTimeout(timer);
   }, [body, preamble, handle]);
@@ -411,18 +448,34 @@ function useCodeEditors(handle: ImperativeAppHandle | null) {
 
   const onCopy = async () => {
     if (!handle) return;
-    await navigator.clipboard.writeText(handle.latexDoc.toFullSource());
+    await navigator.clipboard.writeText(handle.getFullLatexSource());
     setCopyLabel('Copied!');
     window.setTimeout(() => setCopyLabel('Copy'), 1500);
+  };
+
+  const onSelectTool = (tool: ToolType, defId?: string) => {
+    setCurrentTool(tool);
+    setCurrentDefId(defId);
+    handle?.setTool(tool, defId);
+  };
+
+  const onClear = () => {
+    handle?.clearDocument();
   };
 
   return {
     body,
     copyLabel,
+    currentDefId,
+    currentTool,
+    documentVersion,
     documentTextareaRef,
     emitCaretSelection,
+    onClear,
     onCopy,
+    onSelectTool,
     preamble,
+    selectedIds,
     setBody,
     setPreamble,
     stopShortcutPropagation,
@@ -518,58 +571,8 @@ function StatusBarView({ handle, currentTool }: { handle: ImperativeAppHandle | 
   );
 }
 
-function useChromeState(handle: ImperativeAppHandle | null) {
-  const [currentTool, setCurrentTool] = useState<ToolType>('select');
-  const [currentDefId, setCurrentDefId] = useState<string | undefined>(undefined);
-  const [selectedIds, setSelectedIds] = useState<string[]>([]);
-  const [documentVersion, setDocumentVersion] = useState(0);
-
-  useEffect(() => {
-    if (!handle) return;
-
-    setCurrentTool(handle.toolManager.currentType);
-    setCurrentDefId(handle.toolManager.currentDefId);
-    setSelectedIds(handle.selection.getSelectedIds());
-
-    const unsubTool = handle.eventBus.on('tool-changed', (event) => {
-      if (event.type !== 'tool-changed') return;
-      setCurrentTool(event.tool);
-      setCurrentDefId(event.defId);
-    });
-
-    const unsubSelection = handle.eventBus.on('selection-changed', (event) => {
-      if (event.type !== 'selection-changed') return;
-      setSelectedIds(event.selectedIds);
-    });
-
-    const bumpDocumentVersion = () => setDocumentVersion((version) => version + 1);
-    const unsubDocument = handle.eventBus.on('document-changed', bumpDocumentVersion);
-    const unsubBody = handle.eventBus.on('body-changed', bumpDocumentVersion);
-    const unsubEdited = handle.eventBus.on('user-edited-latex', () => {
-      setSelectedIds(handle.selection.getSelectedIds());
-      bumpDocumentVersion();
-    });
-
-    return () => {
-      unsubTool();
-      unsubSelection();
-      unsubDocument();
-      unsubBody();
-      unsubEdited();
-    };
-  }, [handle]);
-
-  return {
-    currentDefId,
-    currentTool,
-    documentVersion,
-    selectedIds,
-  };
-}
-
 function AppShell({ handle }: { handle: ImperativeAppHandle | null }) {
-  const { currentDefId, currentTool, documentVersion, selectedIds } = useChromeState(handle);
-  const codeEditors = useCodeEditors(handle);
+  const appState = useAppState(handle);
   const [collapsed, setCollapsed] = useState({
     library: false,
     props: false,
@@ -578,7 +581,7 @@ function AppShell({ handle }: { handle: ImperativeAppHandle | null }) {
 
   return (
     <>
-      <ToolbarView currentTool={currentTool} handle={handle} />
+      <ToolbarView currentTool={appState.currentTool} onClear={appState.onClear} onSelectTool={appState.onSelectTool} />
 
       <div id="left-panel" className="left-panel">
         <Section
@@ -588,7 +591,7 @@ function AppShell({ handle }: { handle: ImperativeAppHandle | null }) {
           sectionId="section-library"
           title="Library"
         >
-          <LibraryView currentDefId={currentDefId} handle={handle} />
+          <LibraryView currentDefId={appState.currentDefId} handle={handle} onSelectTool={appState.onSelectTool} />
         </Section>
 
         <Section
@@ -598,12 +601,12 @@ function AppShell({ handle }: { handle: ImperativeAppHandle | null }) {
           title="Properties"
         >
           <PropertiesView
-            documentVersion={documentVersion}
+            documentVersion={appState.documentVersion}
             handle={handle}
-            preamble={codeEditors.preamble}
-            selectedIds={selectedIds}
-            setPreamble={codeEditors.setPreamble}
-            stopShortcutPropagation={codeEditors.stopShortcutPropagation}
+            preamble={appState.preamble}
+            selectedIds={appState.selectedIds}
+            setPreamble={appState.setPreamble}
+            stopShortcutPropagation={appState.stopShortcutPropagation}
           />
         </Section>
 
@@ -615,18 +618,18 @@ function AppShell({ handle }: { handle: ImperativeAppHandle | null }) {
           title="Document"
         >
           <DocumentEditor
-            body={codeEditors.body}
-            copyLabel={codeEditors.copyLabel}
-            documentTextareaRef={codeEditors.documentTextareaRef}
-            emitCaretSelection={codeEditors.emitCaretSelection}
-            onCopy={codeEditors.onCopy}
-            setBody={codeEditors.setBody}
-            stopShortcutPropagation={codeEditors.stopShortcutPropagation}
+            body={appState.body}
+            copyLabel={appState.copyLabel}
+            documentTextareaRef={appState.documentTextareaRef}
+            emitCaretSelection={appState.emitCaretSelection}
+            onCopy={appState.onCopy}
+            setBody={appState.setBody}
+            stopShortcutPropagation={appState.stopShortcutPropagation}
           />
         </Section>
       </div>
 
-      <StatusBarView currentTool={currentTool} handle={handle} />
+      <StatusBarView currentTool={appState.currentTool} handle={handle} />
     </>
   );
 }
