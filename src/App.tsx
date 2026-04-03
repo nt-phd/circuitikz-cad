@@ -243,7 +243,6 @@ function PropertiesView({
     <div id="props" data-version={documentVersion}>
       {selectionCount === 0 ? (
         <>
-          <h3>Document</h3>
           <div className="prop-group">
             <label>Preamble</label>
             <Textarea
@@ -260,7 +259,6 @@ function PropertiesView({
       {selectionCount === 1 && wire ? <div className="empty-hint">Wire — edit in Document panel</div> : null}
       {selectionCount === 1 && comp ? (
         <>
-          <h3>{handle.registry.get(comp.defId)?.displayName ?? comp.defId}</h3>
           <div className="prop-group">
             <label>Label</label>
             <Input
@@ -577,6 +575,16 @@ function AppShell({ handle }: { handle: ImperativeAppHandle | null }) {
     props: false,
     document: false,
   });
+  const selectedCount = appState.selectedIds.length;
+  const selectedComponent = handle?.getSelectedComponent();
+  const selectedWire = handle?.getSelectedWire();
+  const propertiesTitle = selectedCount === 0
+    ? 'Properties: Document'
+    : selectedCount > 1
+      ? `Properties: ${selectedCount} Selected`
+      : selectedWire
+        ? 'Properties: Wire'
+        : `Properties: ${handle?.registry.get(selectedComponent?.defId ?? '')?.displayName ?? selectedComponent?.defId ?? 'Component'}`;
 
   return (
     <>
@@ -597,7 +605,7 @@ function AppShell({ handle }: { handle: ImperativeAppHandle | null }) {
           collapsed={collapsed.props}
           onToggle={() => setCollapsed((prev) => ({ ...prev, props: !prev.props }))}
           sectionId="section-props"
-          title="Properties"
+          title={propertiesTitle}
         >
           <PropertiesView
             documentVersion={appState.documentVersion}
