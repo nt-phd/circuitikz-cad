@@ -120,6 +120,8 @@ async function init() {
    */
   eventBus.on('user-edited-latex', () => {
     parseCircuiTikZ(latexDoc.body, circuitDoc, registry);
+    selection.clear();
+    canvas.refresh();
     canvas.scheduleRender();
   });
 
