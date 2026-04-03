@@ -11,12 +11,13 @@
   <div id="app">
     <div id="toolbar" class="toolbar"></div>
 
-    <div id="palette" class="palette"></div>
-
-    <div id="canvas-container" class="canvas-container"></div>
-
-    <!-- Right panel: properties + code editor stacked -->
-    <div id="right-panel" class="right-panel">
+    <div id="left-panel" class="left-panel">
+      <div class="rpanel-section rpanel-section--grow" id="section-library">
+        <div class="rpanel-section-header" data-target="section-library">
+          <span>Library</span><span class="rpanel-chevron">▼</span>
+        </div>
+        <div class="rpanel-section-body" id="palette"></div>
+      </div>
 
       <div class="rpanel-section" id="section-props">
         <div class="rpanel-section-header" data-target="section-props">
@@ -38,8 +39,9 @@
         </div>
         <div class="rpanel-section-body" id="document-panel"></div>
       </div>
-
     </div>
+
+    <div id="canvas-container" class="canvas-container"></div>
 
     <div id="status-bar" class="status-bar"></div>
   </div>

@@ -1,5 +1,5 @@
 import type { GridPoint, ScreenPoint } from '../types';
-import { MIN_ZOOM, MAX_ZOOM } from '../constants';
+import { MIN_ZOOM, MAX_ZOOM, SNAP_GRID } from '../constants';
 import { scaleState } from './ScaleState';
 
 export class ViewTransform {
@@ -27,7 +27,10 @@ export class ViewTransform {
   screenToGrid(screen: ScreenPoint): GridPoint {
     const world = this.screenToWorld(screen);
     const raw = this.worldToGrid(world);
-    return { x: Math.round(raw.x), y: Math.round(raw.y) };
+    return {
+      x: Math.round(raw.x / SNAP_GRID) * SNAP_GRID,
+      y: Math.round(raw.y / SNAP_GRID) * SNAP_GRID,
+    };
   }
 
   gridToScreen(grid: GridPoint): ScreenPoint {

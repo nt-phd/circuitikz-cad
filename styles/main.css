@@ -19,18 +19,18 @@ html, body {
 
 /* ============================================================
    APP GRID
-   toolbar | toolbar  | toolbar
-   palette | canvas   | right-panel
-   status  | status   | status
+   toolbar | toolbar
+   left    | canvas
+   status  | status
    ============================================================ */
 #app {
   display: grid;
-  grid-template-columns: 200px 1fr 280px;
+  grid-template-columns: 320px 1fr;
   grid-template-rows: 40px 1fr 22px;
   grid-template-areas:
-    "toolbar  toolbar  toolbar"
-    "palette  canvas   rpanel"
-    "status   status   status";
+    "toolbar  toolbar"
+    "lpanel   canvas"
+    "status   status";
   height: 100vh;
   width: 100vw;
 }
@@ -77,51 +77,66 @@ html, body {
 }
 
 /* ============================================================
-   PALETTE (left)
+   LEFT PANEL
    ============================================================ */
-.palette {
-  grid-area: palette;
-  background: #fafafa;
-  border-right: 1px solid #ddd;
+.left-panel {
+  grid-area: lpanel;
+  background: #1e1e1e;
+  border-right: 1px solid #111;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  color: #ccc;
+  min-width: 0;
+}
+
+/* ============================================================
+   LIBRARY
+   ============================================================ */
+#palette {
   overflow: hidden;
   display: flex;
   flex-direction: column;
   user-select: none;
+  min-height: 0;
 }
 
-.palette-search {
+.palette-search,
+#palette .palette-search {
   flex-shrink: 0;
   margin: 6px 8px;
   padding: 4px 8px;
-  border: 1px solid #ccc;
-  border-radius: 4px;
+  border: 1px solid #444;
   font-size: 12px;
   font-family: inherit;
   outline: none;
-  background: #fff;
+  background: #2d2d2d;
+  color: #ddd;
 }
-.palette-search:focus { border-color: #1565C0; }
+.palette-search:focus,
+#palette .palette-search:focus { border-color: #1565C0; }
 
-.palette-list {
+#palette .palette-list {
   flex: 1;
   overflow-y: auto;
+  min-height: 0;
 }
 
-.palette .category-title {
+#palette .category-title {
   padding: 6px 10px 3px;
   font-size: 10px;
   font-weight: 700;
   text-transform: uppercase;
   color: #888;
   letter-spacing: 0.6px;
-  background: #f0f0f0;
-  border-top: 1px solid #e0e0e0;
+  background: #252526;
+  border-top: 1px solid #333;
   position: sticky;
   top: 0;
   z-index: 1;
 }
 
-.palette .comp-btn {
+#palette .comp-btn {
   display: flex;
   align-items: center;
   width: 100%;
@@ -133,26 +148,26 @@ html, body {
   font-family: inherit;
   text-align: left;
   transition: background 0.08s;
+  color: #ddd;
 }
-.palette .comp-btn:hover  { background: #e8f0fe; }
-.palette .comp-btn.active { background: #1565C0; color: #fff; }
+#palette .comp-btn:hover  { background: #2d2d2d; }
+#palette .comp-btn.active { background: #1565C0; color: #fff; }
 
-.palette .comp-btn .comp-name {
+#palette .comp-btn .comp-name {
   flex: 1;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.palette .comp-btn .shortcut {
+#palette .comp-btn .shortcut {
   margin-left: 4px;
   font-size: 10px;
   color: #aaa;
   padding: 1px 4px;
-  background: #f0f0f0;
-  border-radius: 2px;
+  background: #1f1f1f;
 }
-.palette .comp-btn.active .shortcut { background: rgba(255,255,255,0.2); color: #ddd; }
+#palette .comp-btn.active .shortcut { background: rgba(255,255,255,0.2); color: #ddd; }
 
 /* ============================================================
    CANVAS
@@ -214,20 +229,7 @@ html, body {
   overflow: visible;
 }
 
-/* ============================================================
-   RIGHT PANEL
-   ============================================================ */
-.right-panel {
-  grid-area: rpanel;
-  background: #1e1e1e;
-  border-left: 1px solid #111;
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-  color: #ccc;
-}
-
-/* A collapsible section inside the right panel */
+/* A collapsible section inside the left panel */
 .rpanel-section {
   display: flex;
   flex-direction: column;
@@ -272,7 +274,7 @@ html, body {
 }
 
 /* ============================================================
-   PROPERTIES (inside right panel)
+   PROPERTIES
    ============================================================ */
 #props {
   padding: 8px;
@@ -349,7 +351,7 @@ html, body {
 }
 
 /* ============================================================
-   CODE TEXTAREAS (inside right panel)
+   CODE TEXTAREAS
    ============================================================ */
 .code-textarea {
   display: block;

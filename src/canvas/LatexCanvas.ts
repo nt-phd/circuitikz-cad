@@ -25,7 +25,7 @@ import { HitTester } from './HitTester';
 import {
   GRID_SIZE, TIKZ_PT_PER_UNIT, RENDER_SERVER_URL,
   MAJOR_GRID_EVERY, GRID_COLOR_MINOR, GRID_COLOR_MAJOR,
-  ZOOM_STEP,
+  ZOOM_STEP, SNAP_GRID,
 } from '../constants';
 import { scaleState } from './ScaleState';
 import { createSvgElement } from '../utils/svg';
@@ -122,7 +122,7 @@ export class LatexCanvas {
   }
 
   updateGridScale(): void {
-    const gs = scaleState.effectiveGridSize;
+    const gs = scaleState.effectiveGridSize * SNAP_GRID;
     const majorSize = gs * MAJOR_GRID_EVERY;
     this.patternMinor.setAttribute('width', String(gs));
     this.patternMinor.setAttribute('height', String(gs));
@@ -230,9 +230,9 @@ export class LatexCanvas {
   private buildGrid(): void {
     const defs = createSvgElement('defs') as SVGDefsElement;
 
-    // Grid tile size = effectiveGridSize (GRID_SIZE × tikzScale).
+    // Grid tile size = effectiveGridSize × SNAP_GRID.
     // Updated in updateGridScale() when the scale changes.
-    const gs = scaleState.effectiveGridSize;
+    const gs = scaleState.effectiveGridSize * SNAP_GRID;
     const majorSize = gs * MAJOR_GRID_EVERY;
 
     this.patternMinor = createSvgElement('pattern', {
