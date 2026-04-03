@@ -9,7 +9,6 @@ import { registry } from './definitions/ComponentRegistry';
 import { LatexCanvas } from './canvas/LatexCanvas';
 import { ToolManager } from './tools/ToolManager';
 import { CircuiTikZEmitter } from './codegen/CircuiTikZEmitter';
-import { parseCircuiTikZ } from './codegen/CircuiTikZParser';
 import { Toolbar } from './ui/Toolbar';
 import { ComponentPalette } from './ui/ComponentPalette';
 import { PropertyPanel } from './ui/PropertyPanel';
@@ -46,10 +45,12 @@ async function init() {
   const statusBar = new StatusBar(document.getElementById('status-bar')!, canvas.view, toolManager, eventBus);
 
   /**
-   * 'document-changed': a CAD tool mutated circuitDoc.
-   *   → regenerate latexDoc.body from the model
-   *   → sync CodePanel textarea (body-changed)
-   *   → compile
+   * CAD tool mutated circuitDoc (component placed, moved, deleted, wire drawn).
+   * → regenerate latexDoc.body from the model
+   * → notify CodePanel to sync its textarea (body-changed)
+   * → compile
+   *
+   * circuitDoc is NOT touched after this point until another CAD action.
    */
   eventBus.on('document-changed', () => {
     latexDoc.body = emitter.emit(circuitDoc);
@@ -59,22 +60,11 @@ async function init() {
   });
 
   /**
-   * 'body-changed': latexDoc.body was updated (either by document-changed above,
-   *   or by the user typing in CodePanel).
-   *   → parse body back into circuitDoc so hit-testing / drag stay in sync
-   *   → if coming from CodePanel (not from a CAD tool), also re-render
+   * User finished typing in CodePanel (debounced).
+   * latexDoc.preamble / latexDoc.body are already up to date.
+   * → just compile — do NOT touch circuitDoc (user is in free-form LaTeX mode)
    */
-  eventBus.on('body-changed', () => {
-    parseCircuiTikZ(latexDoc.body, circuitDoc, registry);
-    canvas.refresh();
-  });
-
-  // CodePanel fires 'document-changed' after its debounce (user finished typing).
-  // At that point latexDoc.body is already correct; we just need to compile.
-  // But document-changed would overwrite the body with the circuitDoc emitter output!
-  // Solution: CodePanel fires a dedicated event instead.
   eventBus.on('user-edited-latex', () => {
-    parseCircuiTikZ(latexDoc.body, circuitDoc, registry);
     canvas.refresh();
     canvas.scheduleRender();
   });

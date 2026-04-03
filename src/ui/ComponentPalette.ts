@@ -47,7 +47,7 @@ export class ComponentPalette {
     // Search box
     this.searchInput = document.createElement('input');
     this.searchInput.type = 'search';
-    this.searchInput.placeholder = 'Cerca componente…';
+    this.searchInput.placeholder = 'Search component…';
     this.searchInput.className = 'palette-search';
     this.searchInput.addEventListener('input', () => this.applyFilter());
     this.container.appendChild(this.searchInput);
@@ -97,7 +97,7 @@ export class ComponentPalette {
     // Group by group field
     const groups = new Map<string, ComponentDef[]>();
     for (const def of defs) {
-      const g = def.group ?? 'Altro';
+      const g = def.group ?? 'Other';
       if (!groups.has(g)) groups.set(g, []);
       groups.get(g)!.push(def);
     }

@@ -4,12 +4,12 @@ import type { ToolManager } from '../tools/ToolManager';
 import type { EventBus } from '../utils/events';
 
 const TOOL_LABELS: Record<string, string> = {
-  'select': 'Seleziona',
-  'wire': 'Filo',
-  'delete': 'Cancella',
-  'place-bipole': 'Piazza componente',
-  'place-monopole': 'Piazza componente',
-  'place-node': 'Piazza componente',
+  'select':         'Select',
+  'wire':           'Wire',
+  'delete':         'Delete',
+  'place-bipole':   'Place component',
+  'place-monopole': 'Place component',
+  'place-node':     'Place component',
 };
 
 export class StatusBar {
@@ -33,19 +33,18 @@ export class StatusBar {
     parent.appendChild(this.zoomSpan);
 
     this.toolSpan = document.createElement('span');
-    this.toolSpan.textContent = 'Seleziona';
+    this.toolSpan.textContent = 'Select';
     parent.appendChild(this.toolSpan);
 
     this.eventBus.on('tool-changed', (event) => {
       if (event.type === 'tool-changed') {
-        this.toolSpan.textContent = TOOL_LABELS[event.tool] || event.tool;
+        this.toolSpan.textContent = TOOL_LABELS[event.tool] ?? event.tool;
       }
     });
   }
 
   updateCoords(gridPt: GridPoint): void {
-    // Display in TikZ coordinates (Y flipped)
     this.coordSpan.textContent = `X: ${gridPt.x}  Y: ${-gridPt.y}`;
-    this.zoomSpan.textContent = `Zoom: ${this.view.zoomPercent}%`;
+    this.zoomSpan.textContent  = `Zoom: ${this.view.zoomPercent}%`;
   }
 }
