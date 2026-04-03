@@ -6,6 +6,7 @@ import { formatCoord } from './codegen/CoordFormatter';
 import { formatLabel } from './codegen/LabelFormatter';
 import type { ChangeEvent, KeyboardEvent as ReactKeyboardEvent, SyntheticEvent } from 'react';
 import type { ComponentDef, TerminalMark, ToolType } from './types';
+import { SNAP_GRID } from './constants';
 
 const GROUP_ORDER = [
   'Resistive bipoles',
@@ -187,22 +188,23 @@ function terminalString(start?: TerminalMark, end?: TerminalMark): string {
   return `${s}-${e}`;
 }
 
-function PropertiesView({ handle }: { handle: ImperativeAppHandle | null }) {
-  const [version, setVersion] = useState(0);
+function formatGridCoord(value: number): string {
+  const snapped = Math.round(value / SNAP_GRID) * SNAP_GRID;
+  const decimals = Number.isInteger(SNAP_GRID) ? 0 : (String(SNAP_GRID).split('.')[1]?.length ?? 0);
+  return snapped.toFixed(decimals).replace(/\.0+$/, '').replace(/(\.\d*?)0+$/, '$1');
+}
 
-  useEffect(() => {
-    if (!handle) return;
-    const unsubSelection = handle.eventBus.on('selection-changed', () => setVersion((v) => v + 1));
-    const unsubDocument = handle.eventBus.on('document-changed', () => setVersion((v) => v + 1));
-    return () => {
-      unsubSelection();
-      unsubDocument();
-    };
-  }, [handle]);
-
+function PropertiesView({
+  handle,
+  selectedIds,
+  documentVersion,
+}: {
+  handle: ImperativeAppHandle | null;
+  selectedIds: string[];
+  documentVersion: number;
+}) {
   if (!handle) return <div id="props" />;
 
-  const selectedIds = handle.selection.getSelectedIds();
   const selectionId = selectedIds[0];
   const selectionCount = selectedIds.length;
   const comp = selectionId ? handle.circuitDoc.getComponent(selectionId) : undefined;
@@ -211,11 +213,10 @@ function PropertiesView({ handle }: { handle: ImperativeAppHandle | null }) {
   const updateComponent = (updater: () => void) => {
     updater();
     handle.eventBus.emit({ type: 'document-changed' });
-    setVersion((v) => v + 1);
   };
 
   return (
-    <div id="props" data-version={version}>
+    <div id="props" data-version={documentVersion}>
       {selectionCount === 0 ? <div className="empty-hint">Select a component to edit its properties</div> : null}
       {selectionCount > 1 ? <div className="empty-hint">{selectionCount} elements selected</div> : null}
       {selectionCount === 1 && wire ? <div className="empty-hint">Wire — edit in Document panel</div> : null}
@@ -512,33 +513,71 @@ function StatusBarView({ handle, currentTool }: { handle: ImperativeAppHandle | 
 
   return (
     <div id="status-bar" className="status-bar">
-      <span className="coord">{`X: ${coords.x}  Y: ${coords.y}`}</span>
+      <span className="coord">{`X: ${formatGridCoord(coords.x)}  Y: ${formatGridCoord(coords.y)}`}</span>
       <span>{`Zoom: ${zoomPercent}%`}</span>
       <span>{toolLabel}</span>
     </div>
   );
 }
 
-export function App() {
-  const [handle, setHandle] = useState<ImperativeAppHandle | null>(null);
+function useChromeState(handle: ImperativeAppHandle | null) {
   const [currentTool, setCurrentTool] = useState<ToolType>('select');
   const [currentDefId, setCurrentDefId] = useState<string | undefined>(undefined);
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [documentVersion, setDocumentVersion] = useState(0);
+
+  useEffect(() => {
+    if (!handle) return;
+
+    setCurrentTool(handle.toolManager.currentType);
+    setCurrentDefId(handle.toolManager.currentDefId);
+    setSelectedIds(handle.selection.getSelectedIds());
+
+    const unsubTool = handle.eventBus.on('tool-changed', (event) => {
+      if (event.type !== 'tool-changed') return;
+      setCurrentTool(event.tool);
+      setCurrentDefId(event.defId);
+    });
+
+    const unsubSelection = handle.eventBus.on('selection-changed', (event) => {
+      if (event.type !== 'selection-changed') return;
+      setSelectedIds(event.selectedIds);
+    });
+
+    const bumpDocumentVersion = () => setDocumentVersion((version) => version + 1);
+    const unsubDocument = handle.eventBus.on('document-changed', bumpDocumentVersion);
+    const unsubBody = handle.eventBus.on('body-changed', bumpDocumentVersion);
+    const unsubEdited = handle.eventBus.on('user-edited-latex', () => {
+      setSelectedIds(handle.selection.getSelectedIds());
+      bumpDocumentVersion();
+    });
+
+    return () => {
+      unsubTool();
+      unsubSelection();
+      unsubDocument();
+      unsubBody();
+      unsubEdited();
+    };
+  }, [handle]);
+
+  return {
+    currentDefId,
+    currentTool,
+    documentVersion,
+    selectedIds,
+  };
+}
+
+function AppShell({ handle }: { handle: ImperativeAppHandle | null }) {
+  const { currentDefId, currentTool, documentVersion, selectedIds } = useChromeState(handle);
+  const codeEditors = useCodeEditors(handle);
   const [collapsed, setCollapsed] = useState({
     library: false,
     props: false,
     preamble: true,
     document: false,
   });
-  const codeEditors = useCodeEditors(handle);
-
-  useEffect(() => {
-    if (!handle) return;
-    return handle.eventBus.on('tool-changed', (event) => {
-      if (event.type !== 'tool-changed') return;
-      setCurrentTool(event.tool);
-      setCurrentDefId(event.defId);
-    });
-  }, [handle]);
 
   return (
     <>
@@ -561,7 +600,11 @@ export function App() {
           sectionId="section-props"
           title="Properties"
         >
-          <PropertiesView handle={handle} />
+          <PropertiesView
+            documentVersion={documentVersion}
+            handle={handle}
+            selectedIds={selectedIds}
+          />
         </Section>
 
         <Section
@@ -596,8 +639,18 @@ export function App() {
         </Section>
       </div>
 
-      <CanvasViewport onReady={setHandle} />
       <StatusBarView currentTool={currentTool} handle={handle} />
+    </>
+  );
+}
+
+export function App() {
+  const [handle, setHandle] = useState<ImperativeAppHandle | null>(null);
+
+  return (
+    <>
+      <AppShell handle={handle} />
+      <CanvasViewport onReady={setHandle} />
     </>
   );
 }

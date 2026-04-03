@@ -3,6 +3,7 @@
  *
  * DOM structure inside `container`:
  *   div.world-transform          ← CSS transform: translate(panX,panY) scale(zoom)
+ *     svg.grid-layer             ← grid dots, pointer-events:none
  *     div.latex-layer            ← injected SVG from pdflatex+pdf2svg, pointer-events:none
  *     svg.overlay-layer          ← grid, ghost, selection — receives mouse events
  *
@@ -41,6 +42,7 @@ export class LatexCanvas {
   readonly hitTester: HitTester;
 
   private worldDiv: HTMLDivElement;
+  private gridSvg: SVGSVGElement;
   private latexDiv: HTMLDivElement;
   readonly overlaySvg: SVGSVGElement;
 
@@ -51,7 +53,11 @@ export class LatexCanvas {
   // Grid SVG elements
   private patternMinor!: SVGPatternElement;
   private patternMajor!: SVGPatternElement;
-  private gridRect!: SVGRectElement;
+  private minorDot!: SVGCircleElement;
+  private majorDot!: SVGCircleElement;
+  private gridRectMinor!: SVGRectElement;
+  private gridRectMajor!: SVGRectElement;
+  private interactionRect!: SVGRectElement;
 
   // Pan/zoom
   private spaceHeld = false;
@@ -74,6 +80,13 @@ export class LatexCanvas {
     this.worldDiv.className = 'world-transform';
     container.appendChild(this.worldDiv);
 
+    // Grid layer below LaTeX render and interaction overlay
+    this.gridSvg = createSvgElement('svg', {
+      class: 'grid-layer',
+      width: '100%', height: '100%',
+    }) as SVGSVGElement;
+    this.worldDiv.appendChild(this.gridSvg);
+
     // LaTeX layer (pointer-events: none — mouse goes to overlay)
     this.latexDiv = document.createElement('div');
     this.latexDiv.className = 'latex-layer';
@@ -85,6 +98,14 @@ export class LatexCanvas {
       width: '100%', height: '100%',
     }) as SVGSVGElement;
     this.worldDiv.appendChild(this.overlaySvg);
+
+    const BIG = 20000;
+    this.interactionRect = createSvgElement('rect', {
+      x: -BIG, y: -BIG, width: BIG * 2, height: BIG * 2,
+      fill: 'transparent',
+      'pointer-events': 'all',
+    }) as SVGRectElement;
+    this.overlaySvg.appendChild(this.interactionRect);
 
     this.buildGrid();
 
@@ -124,15 +145,21 @@ export class LatexCanvas {
   updateGridScale(): void {
     const gs = scaleState.effectiveGridSize * SNAP_GRID;
     const majorSize = gs * MAJOR_GRID_EVERY;
+    this.patternMinor.setAttribute('x', String(-gs / 2));
+    this.patternMinor.setAttribute('y', String(-gs / 2));
     this.patternMinor.setAttribute('width', String(gs));
     this.patternMinor.setAttribute('height', String(gs));
+    this.minorDot.setAttribute('cx', String(gs / 2));
+    this.minorDot.setAttribute('cy', String(gs / 2));
+
+    this.patternMajor.setAttribute('x', String(-majorSize / 2));
+    this.patternMajor.setAttribute('y', String(-majorSize / 2));
     this.patternMajor.setAttribute('width', String(majorSize));
     this.patternMajor.setAttribute('height', String(majorSize));
-    const majorRect = this.patternMajor.querySelector('rect');
-    if (majorRect) {
-      majorRect.setAttribute('width', String(majorSize));
-      majorRect.setAttribute('height', String(majorSize));
-    }
+    this.majorDot.setAttribute('cx', String(majorSize / 2));
+    this.majorDot.setAttribute('cy', String(majorSize / 2));
+
+    this.updateGridDotScale();
   }
 
   /** Trigger a pdflatex render. Queues if one is already in flight. */
@@ -229,42 +256,63 @@ export class LatexCanvas {
 
   private buildGrid(): void {
     const defs = createSvgElement('defs') as SVGDefsElement;
-
-    // Grid tile size = effectiveGridSize × SNAP_GRID.
-    // Updated in updateGridScale() when the scale changes.
     const gs = scaleState.effectiveGridSize * SNAP_GRID;
     const majorSize = gs * MAJOR_GRID_EVERY;
 
     this.patternMinor = createSvgElement('pattern', {
-      id: 'lc-grid-minor', patternUnits: 'userSpaceOnUse',
-      x: 0, y: 0, width: gs, height: gs,
+      id: 'lc-grid-minor',
+      patternUnits: 'userSpaceOnUse',
+      x: -gs / 2,
+      y: -gs / 2,
+      width: gs,
+      height: gs,
     }) as SVGPatternElement;
-    this.patternMinor.appendChild(createSvgElement('circle', {
-      cx: 0, cy: 0, r: 0.75, fill: GRID_COLOR_MINOR,
-    }));
+    this.minorDot = createSvgElement('circle', {
+      cx: gs / 2,
+      cy: gs / 2,
+      r: 2,
+      fill: GRID_COLOR_MINOR,
+    }) as SVGCircleElement;
+    this.patternMinor.appendChild(this.minorDot);
     defs.appendChild(this.patternMinor);
 
     this.patternMajor = createSvgElement('pattern', {
-      id: 'lc-grid-major', patternUnits: 'userSpaceOnUse',
-      x: 0, y: 0, width: majorSize, height: majorSize,
+      id: 'lc-grid-major',
+      patternUnits: 'userSpaceOnUse',
+      x: -majorSize / 2,
+      y: -majorSize / 2,
+      width: majorSize,
+      height: majorSize,
     }) as SVGPatternElement;
-    this.patternMajor.appendChild(createSvgElement('rect', {
-      x: 0, y: 0, width: majorSize, height: majorSize,
-      fill: 'url(#lc-grid-minor)',
-    }));
-    this.patternMajor.appendChild(createSvgElement('circle', {
-      cx: 0, cy: 0, r: 1.5, fill: GRID_COLOR_MAJOR,
-    }));
+    this.majorDot = createSvgElement('circle', {
+      cx: majorSize / 2,
+      cy: majorSize / 2,
+      r: 3.5,
+      fill: GRID_COLOR_MAJOR,
+    }) as SVGCircleElement;
+    this.patternMajor.appendChild(this.majorDot);
     defs.appendChild(this.patternMajor);
 
-    this.overlaySvg.appendChild(defs);
+    this.gridSvg.appendChild(defs);
 
     const BIG = 20000;
-    this.gridRect = createSvgElement('rect', {
-      x: -BIG, y: -BIG, width: BIG * 2, height: BIG * 2,
+    this.gridRectMinor = createSvgElement('rect', {
+      x: -BIG,
+      y: -BIG,
+      width: BIG * 2,
+      height: BIG * 2,
+      fill: 'url(#lc-grid-minor)',
+    }) as SVGRectElement;
+    this.gridRectMajor = createSvgElement('rect', {
+      x: -BIG,
+      y: -BIG,
+      width: BIG * 2,
+      height: BIG * 2,
       fill: 'url(#lc-grid-major)',
     }) as SVGRectElement;
-    this.overlaySvg.insertBefore(this.gridRect, this.overlaySvg.firstChild);
+    this.gridSvg.appendChild(this.gridRectMajor);
+    this.gridSvg.appendChild(this.gridRectMinor);
+    this.updateGridDotScale();
   }
 
   // ====== PAN/ZOOM ======
@@ -272,6 +320,14 @@ export class LatexCanvas {
   private applyTransform(): void {
     this.worldDiv.style.transform =
       `translate(${this.view.panX}px, ${this.view.panY}px) scale(${this.view.zoom})`;
+    this.updateGridDotScale();
+  }
+
+  private updateGridDotScale(): void {
+    const minorRadius = 2 / this.view.zoom;
+    const majorRadius = 3.5 / this.view.zoom;
+    this.minorDot?.setAttribute('r', String(minorRadius));
+    this.majorDot?.setAttribute('r', String(majorRadius));
   }
 
   private attachPanZoom(): void {
