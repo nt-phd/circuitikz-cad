@@ -21,6 +21,12 @@ export type Mirror = 'none' | 'horizontal' | 'vertical';
 
 export type PlacementType = 'bipole' | 'node' | 'monopole';
 
+export interface SymbolPin {
+  name: string;
+  x: number;
+  y: number;
+}
+
 export interface ComponentDef {
   id: string;
   displayName: string;
@@ -42,6 +48,7 @@ export interface ComponentDef {
    */
   symbolRefX: number;
   symbolRefY: number;
+  symbolPins?: SymbolPin[];
   /** viewBox of the symbol */
   viewBox: string;
   viewBoxW: number;

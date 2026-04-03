@@ -7,6 +7,7 @@ export class CodePanel {
   private preambleArea: HTMLTextAreaElement;
   private bodyArea: HTMLTextAreaElement;
   private renderTimer: ReturnType<typeof setTimeout> | null = null;
+  private caretSelectionTimer: number | null = null;
   private updatingFromModel = false;
   private lastCaretLineIndex = -1;
 
@@ -55,8 +56,8 @@ export class CodePanel {
     this.preambleArea.addEventListener('keydown', e => e.stopPropagation());
     this.bodyArea.addEventListener('keydown',    e => e.stopPropagation());
 
-    for (const eventName of ['click', 'keyup', 'select', 'mouseup'] as const) {
-      this.bodyArea.addEventListener(eventName, () => this.emitCaretSelection());
+    for (const eventName of ['click', 'focus', 'keyup', 'select', 'mouseup'] as const) {
+      this.bodyArea.addEventListener(eventName, () => this.scheduleCaretSelection());
     }
   }
 
@@ -131,6 +132,14 @@ export class CodePanel {
     if (lineIndex === this.lastCaretLineIndex) return;
     this.lastCaretLineIndex = lineIndex;
     this.eventBus.emit({ type: 'code-caret-changed', lineIndex });
+  }
+
+  private scheduleCaretSelection(): void {
+    if (this.caretSelectionTimer !== null) window.clearTimeout(this.caretSelectionTimer);
+    this.caretSelectionTimer = window.setTimeout(() => {
+      this.caretSelectionTimer = null;
+      this.emitCaretSelection();
+    }, 0);
   }
 
   private currentCaretLineIndex(): number {

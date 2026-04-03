@@ -7,11 +7,12 @@
  *
  * Supported syntax:
  *   \draw (x,y) to[tikzName, opts...] (x2,y2);   → BipoleInstance
- *   \draw (x,y) node[tikzName] {};                → MonopoleInstance
+ *   \draw (x,y) node[tikzName] {};                → Monopole/Node instance
+ *   \node[tikzName,...] at (x,y) {};              → Monopole/Node instance
  *   \draw (x,y) -- (x2,y2) -- ...;               → WireInstance
  */
 
-import type { GridPoint, BipoleInstance, MonopoleInstance, WireInstance, ComponentProps, TerminalMark } from '../types';
+import type { GridPoint, BipoleInstance, MonopoleInstance, NodeInstance, WireInstance, ComponentProps, TerminalMark } from '../types';
 import type { CircuitDocument } from '../model/CircuitDocument';
 import type { ComponentRegistry } from '../definitions/ComponentRegistry';
 
@@ -56,6 +57,27 @@ function splitOptions(s: string): string[] {
   }
   if (cur.trim()) parts.push(cur.trim());
   return parts;
+}
+
+function addPlacedComponent(
+  doc: CircuitDocument,
+  registry: ComponentRegistry,
+  tikzToDefId: Map<string, string>,
+  id: string,
+  tikzName: string,
+  position: GridPoint,
+): void {
+  const defId = tikzToDefId.get(tikzName) ?? tikzName;
+  const def = registry.get(defId);
+  if (def?.placementType === 'node') {
+    const comp: NodeInstance = {
+      id, defId, type: 'node', position, rotation: 0, mirror: 'none', props: {},
+    };
+    doc.addComponent(comp);
+    return;
+  }
+  const comp: MonopoleInstance = { id, defId, type: 'monopole', position, rotation: 0, props: {} };
+  doc.addComponent(comp);
 }
 
 // ─── main parser ────────────────────────────────────────────────────────────
@@ -106,12 +128,20 @@ export function parseCircuiTikZ(
   }
 
   for (const { text: stmt, lineIndex } of statements) {
+    // Stable ID = 'line:<lineIndex>'
+    const id = `line:${lineIndex}`;
+
+    const nodeStmtMatch = stmt.match(/^\\node\s*\[([^\]]+)\](?:\([^)]+\))?\s+at\s+(\([^)]+\))\s*\{[\s\S]*?\}(?:\s+.*)?$/);
+    if (nodeStmtMatch) {
+      const position = parseCoord(nodeStmtMatch[2]);
+      const tikzName = splitOptions(nodeStmtMatch[1])[0]?.trim();
+      if (position && tikzName) addPlacedComponent(doc, registry, tikzToDefId, id, tikzName, position);
+      continue;
+    }
+
     const drawMatch = stmt.match(/\\draw(?:\[.*?\])?\s+(.+)$/s);
     if (!drawMatch) continue;
     const body = drawMatch[1].trim();
-
-    // Stable ID = 'line:<lineIndex>'
-    const id = `line:${lineIndex}`;
 
     // Wire: coords joined by --
     if (/^\(.*\)(\s*--\s*\(.*\))+$/.test(body)) {
@@ -123,14 +153,12 @@ export function parseCircuiTikZ(
       continue;
     }
 
-    // Monopole: (x,y) node[name] {}
+    // Monopole/Node: (x,y) node[name] {}
     const nodeMatch = body.match(/^\(([-\d.]+)\s*,\s*([-\d.]+)\)\s+node\[([^\]]+)\]\s*\{[^}]*\}$/);
     if (nodeMatch) {
       const position: GridPoint = { x: parseFloat(nodeMatch[1]), y: -parseFloat(nodeMatch[2]) };
       const tikzName = nodeMatch[3].trim().split(',')[0].trim();
-      const defId = tikzToDefId.get(tikzName) ?? tikzName;
-      const comp: MonopoleInstance = { id, defId, type: 'monopole', position, rotation: 0, props: {} };
-      doc.addComponent(comp);
+      addPlacedComponent(doc, registry, tikzToDefId, id, tikzName, position);
       continue;
     }
 

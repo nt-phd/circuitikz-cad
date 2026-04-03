@@ -3,13 +3,13 @@
  * Uses scaleState.effectiveGridSize so coordinates stay aligned with the
  * pdflatex-rendered SVG regardless of \begin{tikzpicture}[scale=...].
  */
-import type { GridPoint, BipoleInstance, MonopoleInstance, NodeInstance, ComponentInstance, ComponentDef, WireInstance } from '../types';
+import type { GridPoint, BipoleInstance, ComponentInstance, ComponentDef, WireInstance } from '../types';
 import type { ComponentRegistry } from '../definitions/ComponentRegistry';
 import type { SelectionState } from '../model/SelectionState';
 import type { CircuitDocument } from '../model/CircuitDocument';
 import { WIRE_WIDTH, SELECTION_COLOR, GHOST_OPACITY } from '../constants';
 import { scaleState } from './ScaleState';
-import { createGroup, createLine, createSvgElement } from '../utils/svg';
+import { createGroup, createLine, createSvgElement, createRect } from '../utils/svg';
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
 
@@ -101,13 +101,13 @@ export class GhostRenderer {
       this.selectionGroup.appendChild(this.buildBipoleSelection(comp, def));
       return;
     }
-    if (comp.type === 'monopole') this.selectionGroup.appendChild(this.buildMonopoleSelection(comp, def));
-    if (comp.type === 'node') this.selectionGroup.appendChild(this.buildNodeSelection(comp, def));
+    this.selectionGroup.appendChild(this.buildPlacedComponentSelection(comp.position.x, comp.position.y, def, comp.rotation));
   }
 
   private buildWireSelection(wire: WireInstance): SVGGElement {
     const gs = this.gs;
     const g = createGroup('sel-wire');
+    for (const p of wire.points) g.appendChild(this.crossAt(p.x * gs, p.y * gs, gs * 0.15));
     for (let i = 0; i < wire.points.length - 1; i++) {
       const a = wire.points[i], b = wire.points[i + 1];
       g.appendChild(createLine(
@@ -128,74 +128,79 @@ export class GhostRenderer {
     const dy = ey - sy;
     const dist = Math.hypot(dx, dy);
     const angleDeg = Math.atan2(dy, dx) * 180 / Math.PI;
-    const bodyPx = 2 * gs;
-    const scale = bodyPx / def.symbolPinSpan;
-    const pinStartAbsX = def.symbolRefX - def.symbolPinSpan / 2;
-    const pinEndAbsX = def.symbolRefX + def.symbolPinSpan / 2;
-    const pinStartPx = pinStartAbsX * scale;
-    const pinEndPx = pinEndAbsX * scale;
-    const refXPx = def.symbolRefX * scale;
-    const refYPx = def.symbolRefY * scale;
-    const axisOffset = dist / 2 - refXPx;
-    const leadEndStart = axisOffset + pinStartPx;
-    const leadStartEnd = axisOffset + pinEndPx;
 
     const g = createGroup('sel-bipole');
     g.setAttribute('transform', `translate(${sx}, ${sy}) rotate(${angleDeg})`);
-    if (leadEndStart > 0.5) {
-      g.appendChild(createLine(0, 0, leadEndStart, 0, {
-        stroke: SELECTION_COLOR, 'stroke-width': WIRE_WIDTH + 2, 'stroke-linecap': 'round',
-      }));
+    const bodyPx = 2 * gs;
+    const scale = bodyPx / def.symbolPinSpan;
+    const bodyWidth = def.viewBoxW * scale;
+    const bodyHeight = Math.min(def.viewBoxH * scale, gs * 1.2);
+    const bodyX = dist / 2 - bodyWidth / 2;
+    const bodyY = -bodyHeight / 2;
+    g.appendChild(createRect(bodyX, bodyY, bodyWidth, bodyHeight, {
+      fill: SELECTION_COLOR,
+      opacity: 0.22,
+    }));
+    for (const pin of def.symbolPins ?? []) {
+      const localX = dist / 2 + pin.x * scale;
+      const localY = pin.y * scale;
+      g.appendChild(this.crossAt(localX, localY, gs * 0.15));
     }
-    if (dist - leadStartEnd > 0.5) {
-      g.appendChild(createLine(leadStartEnd, 0, dist, 0, {
-        stroke: SELECTION_COLOR, 'stroke-width': WIRE_WIDTH + 2, 'stroke-linecap': 'round',
-      }));
+    return g;
+  }
+
+  private buildPlacedComponentSelection(x: number, y: number, def: ComponentDef, rotation: number): SVGGElement {
+    const gs = this.gs;
+    const cx = x * gs;
+    const cy = y * gs;
+    const baseScale = def.placementType === 'node'
+      ? (gs * 3) / def.viewBoxW
+      : (gs * 1.5) / def.viewBoxH;
+    const width = def.viewBoxW * baseScale;
+    const height = def.viewBoxH * baseScale;
+    const left = cx - def.symbolRefX * baseScale;
+    const top = cy - def.symbolRefY * baseScale;
+    const g = createGroup('sel-point');
+    g.appendChild(createRect(left, top, width, height, {
+      fill: SELECTION_COLOR,
+      opacity: 0.22,
+    }));
+    const pins = (def.symbolPins && def.symbolPins.length > 0)
+      ? def.symbolPins
+      : [{ name: 'reference', x: 0, y: 0 }];
+    for (const pin of pins) {
+      const projected = this.projectPlacedPin(cx, cy, pin.x * baseScale, pin.y * baseScale, rotation);
+      g.appendChild(this.crossAt(projected.x, projected.y, gs * 0.15));
     }
-
-    const symG = document.createElementNS(SVG_NS, 'g');
-    symG.setAttribute('transform', `translate(${axisOffset}, ${-refYPx}) scale(${scale})`);
-    symG.appendChild(this.createSelectionUse(def.symbolId));
-    g.appendChild(symG);
     return g;
   }
 
-  private buildMonopoleSelection(comp: MonopoleInstance, def: ComponentDef): SVGGElement {
-    const gs = this.gs;
-    const wx = comp.position.x * gs;
-    const wy = comp.position.y * gs;
-    const scale = (gs * 1.5) / def.viewBoxH;
-    const tx = wx - def.symbolRefX * scale;
-    const ty = wy - def.symbolRefY * scale;
-    const g = createGroup('sel-monopole');
-    g.setAttribute(
-      'transform',
-      `translate(${tx}, ${ty}) rotate(${comp.rotation}, ${def.symbolRefX * scale}, ${def.symbolRefY * scale}) scale(${scale})`,
-    );
-    g.appendChild(this.createSelectionUse(def.symbolId));
-    return g;
+  private projectPlacedPin(
+    centerX: number,
+    centerY: number,
+    offsetX: number,
+    offsetY: number,
+    rotation: number,
+  ): { x: number; y: number } {
+    if (!rotation) return { x: centerX + offsetX, y: centerY + offsetY };
+    const angle = rotation * Math.PI / 180;
+    const cos = Math.cos(angle);
+    const sin = Math.sin(angle);
+    return {
+      x: centerX + offsetX * cos - offsetY * sin,
+      y: centerY + offsetX * sin + offsetY * cos,
+    };
   }
 
-  private buildNodeSelection(comp: NodeInstance, def: ComponentDef): SVGGElement {
-    const gs = this.gs;
-    const wx = comp.position.x * gs;
-    const wy = comp.position.y * gs;
-    const scale = (gs * 3) / def.viewBoxW;
-    const tx = wx - def.symbolRefX * scale;
-    const ty = wy - def.symbolRefY * scale;
-    const g = createGroup('sel-node');
-    g.setAttribute('transform', `translate(${tx}, ${ty}) scale(${scale})`);
-    g.appendChild(this.createSelectionUse(def.symbolId));
+  private crossAt(x: number, y: number, halfSize: number): SVGGElement {
+    const g = createGroup('sel-cross');
+    g.appendChild(createLine(x - halfSize, y - halfSize, x + halfSize, y + halfSize, {
+      stroke: SELECTION_COLOR, 'stroke-width': 0.5, 'stroke-linecap': 'butt',
+    }));
+    g.appendChild(createLine(x - halfSize, y + halfSize, x + halfSize, y - halfSize, {
+      stroke: SELECTION_COLOR, 'stroke-width': 0.5, 'stroke-linecap': 'butt',
+    }));
     return g;
-  }
-
-  private createSelectionUse(symbolId: string): SVGUseElement {
-    const useEl = document.createElementNS(SVG_NS, 'use');
-    useEl.setAttribute('href', `#${symbolId}`);
-    useEl.setAttribute('stroke', SELECTION_COLOR);
-    useEl.setAttribute('fill', SELECTION_COLOR);
-    useEl.setAttribute('opacity', '0.9');
-    return useEl;
   }
 
   private dot(x: number, y: number): SVGCircleElement {

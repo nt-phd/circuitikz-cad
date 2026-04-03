@@ -71,6 +71,7 @@ export function populateRegistryFromSymbolsDB(
       symbolPinSpan,
       symbolRefX: v.refX,
       symbolRefY: v.refY,
+      symbolPins: v.pins.map((pin) => ({ name: pin.name, x: pin.x, y: pin.y })),
       viewBox: v.viewBox,
       viewBoxW: v.viewBoxWidth,
       viewBoxH: v.viewBoxHeight,

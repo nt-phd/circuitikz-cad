@@ -88,7 +88,7 @@ export class LatexCanvas {
 
     this.buildGrid();
 
-    this.hitTester = new HitTester(circuitDoc);
+    this.hitTester = new HitTester(circuitDoc, registry);
     this.ghost = new GhostRenderer(this.overlaySvg, circuitDoc, registry, selection);
 
     this.attachPanZoom();
