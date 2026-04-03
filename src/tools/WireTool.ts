@@ -46,7 +46,7 @@ export class WireTool extends BaseTool {
     if (this.points.length >= 2) {
       const wire: WireInstance = { id: uid('wire'), points: [...this.points], junctions: new Map() };
       this.ctx.getDocument().addWire(wire);
-      this.ctx.emit({ type: 'wire-added', wire });
+      this.ctx.emit({ type: 'document-changed' });
     }
     this.points = [];
     this.ctx.ghost.setGhostElement(null);

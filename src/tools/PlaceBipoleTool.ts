@@ -45,7 +45,7 @@ export class PlaceBipoleTool extends BaseTool {
       };
 
       this.ctx.getDocument().addComponent(comp);
-      this.ctx.emit({ type: 'component-added', component: comp });
+      this.ctx.emit({ type: 'document-changed' });
 
       // Reset for next placement (sticky!)
       this.startPoint = null;

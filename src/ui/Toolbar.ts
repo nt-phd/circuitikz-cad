@@ -30,8 +30,9 @@ export class Toolbar {
     this.addButton(parent, 'Clear', 'clear', () => {
       this.circuitDoc.clear();
       this.latexDoc.body = DEFAULT_BODY;
+      // body-changed syncs the textarea; document-changed would re-merge CAD (now empty)
       this.eventBus.emit({ type: 'body-changed' });
-      this.eventBus.emit({ type: 'document-changed' });
+      this.eventBus.emit({ type: 'user-edited-latex' });
     });
 
     this.updateActiveState();

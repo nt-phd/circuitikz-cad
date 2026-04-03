@@ -29,7 +29,7 @@ export class PlaceMonopoleTool extends BaseTool {
     };
 
     this.ctx.getDocument().addComponent(comp);
-    this.ctx.emit({ type: 'component-added', component: comp });
+    this.ctx.emit({ type: 'document-changed' });
     // Sticky: stay in tool, ready for next placement
   }
 

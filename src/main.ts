@@ -30,6 +30,36 @@ function initCollapsibleSections(): void {
   });
 }
 
+/**
+ * Merge CAD-generated \draw lines into the existing body.
+ *
+ * The body is a tikzpicture block. CAD components are kept in a delimited
+ * section between two comment markers so they can be replaced without
+ * touching the user's hand-written TikZ.
+ *
+ * If the markers don't exist yet (first CAD placement), they are appended
+ * just before \end{tikzpicture}.
+ */
+const CAD_BEGIN = '% --- CAD BEGIN ---';
+const CAD_END   = '% --- CAD END ---';
+
+function mergeCadIntoBody(body: string, cadLines: string[]): string {
+  const cadBlock = cadLines.length > 0
+    ? `${CAD_BEGIN}\n${cadLines.map(l => `  ${l}`).join('\n')}\n${CAD_END}`
+    : `${CAD_BEGIN}\n${CAD_END}`;
+
+  if (body.includes(CAD_BEGIN)) {
+    // Replace existing CAD block
+    return body.replace(
+      new RegExp(`${CAD_BEGIN}[\\s\\S]*?${CAD_END}`),
+      cadBlock,
+    );
+  }
+
+  // Insert before \end{tikzpicture}
+  return body.replace(/\\end\{tikzpicture\}/, `${cadBlock}\n\\end{tikzpicture}`);
+}
+
 async function init() {
   initCollapsibleSections();
 
@@ -71,11 +101,13 @@ async function init() {
   );
 
   /**
-   * CAD tool mutated circuitDoc → regenerate latexDoc.body → sync CodePanel → render.
-   * Does NOT parse body back into circuitDoc (that would overwrite what was just added).
+   * CAD tool mutated circuitDoc.
+   * Merge the generated \draw lines into the CAD section of the body,
+   * leaving the user's hand-written TikZ untouched.
    */
   eventBus.on('document-changed', () => {
-    latexDoc.body = emitter.emit(circuitDoc);
+    const cadLines = emitter.emitLines(circuitDoc);
+    latexDoc.body = mergeCadIntoBody(latexDoc.body, cadLines);
     eventBus.emit({ type: 'body-changed' });
     canvas.refresh();
     canvas.scheduleRender();
@@ -83,18 +115,15 @@ async function init() {
 
   /**
    * User finished typing in CodePanel (debounced).
-   * latexDoc.body is already up to date.
-   * Parse body into circuitDoc so CAD tools (hit-test, drag) stay in sync,
-   * then recompile.
+   * Parse whatever is in the body into circuitDoc so hit-test / drag work
+   * for any components the parser recognises.
    */
   eventBus.on('user-edited-latex', () => {
     parseCircuiTikZ(latexDoc.body, circuitDoc, registry);
     canvas.scheduleRender();
   });
 
-  // Parse the default body so circuitDoc is populated from the start.
-  // Without this, clicking on the canvas immediately triggers document-changed
-  // which overwrites the body with the empty circuitDoc emitter output.
+  // Populate circuitDoc from the default body at startup.
   parseCircuiTikZ(latexDoc.body, circuitDoc, registry);
 
   canvas.overlaySvg.addEventListener('mousemove', (e) => {
