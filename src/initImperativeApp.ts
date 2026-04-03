@@ -13,7 +13,7 @@ import { extractTikzScale, scaleState } from './canvas/ScaleState';
 import { formatCoord } from './codegen/CoordFormatter';
 import { formatLabel } from './codegen/LabelFormatter';
 import { DEFAULT_BODY } from './model/LatexDocument';
-import type { ComponentInstance, WireInstance, TerminalMark, ToolType } from './types';
+import type { ComponentInstance, WireInstance, TerminalMark, ToolType, Rotation, ComponentProps } from './types';
 import type { ToolContext } from './tools/BaseTool';
 
 let initialized = false;
@@ -81,13 +81,26 @@ export interface ImperativeAppHandle {
   toolManager: ToolManager;
   getCurrentTool: () => { tool: ToolType; defId?: string };
   getSelectedIds: () => string[];
+  getPreamble: () => string;
+  getBody: () => string;
   getFullLatexSource: () => string;
+  getSelectedComponent: () => ComponentInstance | undefined;
+  getSelectedWire: () => WireInstance | undefined;
   setTool: (tool: ToolType, defId?: string) => void;
   setSelectedIds: (selectedIds: string[], source?: 'canvas' | 'code' | 'programmatic') => void;
+  selectSourceLine: (lineIndex: number) => void;
   setPreamble: (preamble: string) => void;
   setBody: (body: string) => void;
+  updateComponentProps: (id: string, props: Partial<ComponentProps>) => void;
+  setComponentRotation: (id: string, rotation: Rotation) => void;
   commitLatexEdits: () => void;
   commitDocumentChange: () => void;
+  onToolChange: (fn: (tool: ToolType, defId?: string) => void) => () => void;
+  onSelectionChange: (fn: (selectedIds: string[], source?: 'canvas' | 'code' | 'programmatic') => void) => () => void;
+  onBodyChange: (fn: () => void) => () => void;
+  onDocumentChange: (fn: () => void) => () => void;
+  onLatexEdited: (fn: () => void) => () => void;
+  onCursorGridChange: (fn: (gridPt: { x: number; y: number }, zoomPercent: number) => void) => () => void;
   clearDocument: () => void;
 }
 
@@ -195,10 +208,23 @@ async function createImperativeApp(canvasContainer: HTMLElement): Promise<Impera
     toolManager,
     getCurrentTool: () => ({ tool: toolManager.currentType, defId: toolManager.currentDefId }),
     getSelectedIds: () => selection.getSelectedIds(),
+    getPreamble: () => latexDoc.preamble,
+    getBody: () => latexDoc.body,
     getFullLatexSource: () => latexDoc.toFullSource(),
+    getSelectedComponent: () => {
+      const [id] = selection.getSelectedIds();
+      return id ? circuitDoc.getComponent(id) : undefined;
+    },
+    getSelectedWire: () => {
+      const [id] = selection.getSelectedIds();
+      return id ? circuitDoc.getWire(id) : undefined;
+    },
     setTool: (tool, defId) => toolManager.setTool(tool, defId),
     setSelectedIds: (selectedIds, source = 'programmatic') => {
       eventBus.emit({ type: 'selection-changed', selectedIds, source });
+    },
+    selectSourceLine: (lineIndex) => {
+      eventBus.emit({ type: 'code-caret-changed', lineIndex });
     },
     setPreamble: (preamble) => {
       latexDoc.preamble = preamble;
@@ -206,12 +232,39 @@ async function createImperativeApp(canvasContainer: HTMLElement): Promise<Impera
     setBody: (body) => {
       latexDoc.body = body;
     },
+    updateComponentProps: (id, props) => {
+      const comp = circuitDoc.getComponent(id);
+      if (!comp) return;
+      Object.assign(comp.props, props);
+    },
+    setComponentRotation: (id, rotation) => {
+      const comp = circuitDoc.getComponent(id);
+      if (!comp) return;
+      if (comp.type === 'monopole' || comp.type === 'node') {
+        comp.rotation = rotation;
+      }
+    },
     commitLatexEdits: () => {
       eventBus.emit({ type: 'user-edited-latex' });
     },
     commitDocumentChange: () => {
       eventBus.emit({ type: 'document-changed' });
     },
+    onToolChange: (fn) => eventBus.on('tool-changed', (event) => {
+      if (event.type !== 'tool-changed') return;
+      fn(event.tool, event.defId);
+    }),
+    onSelectionChange: (fn) => eventBus.on('selection-changed', (event) => {
+      if (event.type !== 'selection-changed') return;
+      fn(event.selectedIds, event.source);
+    }),
+    onBodyChange: (fn) => eventBus.on('body-changed', fn),
+    onDocumentChange: (fn) => eventBus.on('document-changed', fn),
+    onLatexEdited: (fn) => eventBus.on('user-edited-latex', fn),
+    onCursorGridChange: (fn) => eventBus.on('cursor-grid-changed', (event) => {
+      if (event.type !== 'cursor-grid-changed') return;
+      fn(event.gridPt, event.zoomPercent);
+    }),
     clearDocument: () => {
       circuitDoc.clear();
       latexDoc.body = DEFAULT_BODY;

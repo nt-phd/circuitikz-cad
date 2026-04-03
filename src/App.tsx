@@ -5,7 +5,7 @@ import { lineIndexFromId } from './codegen/CircuiTikZParser';
 import { formatCoord } from './codegen/CoordFormatter';
 import { formatLabel } from './codegen/LabelFormatter';
 import type { ChangeEvent, KeyboardEvent as ReactKeyboardEvent, SyntheticEvent } from 'react';
-import type { ComponentDef, TerminalMark, ToolType } from './types';
+import type { ComponentDef, TerminalMark, ToolType, Rotation } from './types';
 import { SNAP_GRID } from './constants';
 
 const GROUP_ORDER = [
@@ -217,11 +217,18 @@ function PropertiesView({
 
   const selectionId = selectedIds[0];
   const selectionCount = selectedIds.length;
-  const comp = selectionId ? handle.circuitDoc.getComponent(selectionId) : undefined;
-  const wire = selectionId ? handle.circuitDoc.getWire(selectionId) : undefined;
+  const comp = handle.getSelectedComponent();
+  const wire = handle.getSelectedWire();
 
-  const updateComponent = (updater: () => void) => {
-    updater();
+  const updateComponentProps = (props: Record<string, string | undefined>) => {
+    if (!selectionId) return;
+    handle.updateComponentProps(selectionId, props);
+    handle.commitDocumentChange();
+  };
+
+  const updateRotation = (rotation: Rotation) => {
+    if (!selectionId) return;
+    handle.setComponentRotation(selectionId, rotation);
     handle.commitDocumentChange();
   };
 
@@ -250,9 +257,7 @@ function PropertiesView({
           <div className="prop-group">
             <label>Label</label>
             <input
-              onChange={(e) => updateComponent(() => {
-                comp.props.label = e.target.value || undefined;
-              })}
+              onChange={(e) => updateComponentProps({ label: e.target.value || undefined })}
               placeholder="$R_1$"
               type="text"
               value={comp.props.label ?? ''}
@@ -261,9 +266,7 @@ function PropertiesView({
           <div className="prop-group">
             <label>Value</label>
             <input
-              onChange={(e) => updateComponent(() => {
-                comp.props.value = e.target.value || undefined;
-              })}
+              onChange={(e) => updateComponentProps({ value: e.target.value || undefined })}
               type="text"
               value={comp.props.value ?? ''}
             />
@@ -271,9 +274,7 @@ function PropertiesView({
           <div className="prop-group">
             <label>Voltage (v=)</label>
             <input
-              onChange={(e) => updateComponent(() => {
-                comp.props.voltage = e.target.value || undefined;
-              })}
+              onChange={(e) => updateComponentProps({ voltage: e.target.value || undefined })}
               type="text"
               value={comp.props.voltage ?? ''}
             />
@@ -281,9 +282,7 @@ function PropertiesView({
           <div className="prop-group">
             <label>Current (i=)</label>
             <input
-              onChange={(e) => updateComponent(() => {
-                comp.props.current = e.target.value || undefined;
-              })}
+              onChange={(e) => updateComponentProps({ current: e.target.value || undefined })}
               type="text"
               value={comp.props.current ?? ''}
             />
@@ -293,9 +292,7 @@ function PropertiesView({
               <div className="prop-group">
                 <label>Start terminal</label>
                 <select
-                  onChange={(e) => updateComponent(() => {
-                    comp.props.startTerminal = e.target.value as TerminalMark;
-                  })}
+                  onChange={(e) => updateComponentProps({ startTerminal: e.target.value as TerminalMark })}
                   value={comp.props.startTerminal ?? 'none'}
                 >
                   <option value="none">None (-)</option>
@@ -306,9 +303,7 @@ function PropertiesView({
               <div className="prop-group">
                 <label>End terminal</label>
                 <select
-                  onChange={(e) => updateComponent(() => {
-                    comp.props.endTerminal = e.target.value as TerminalMark;
-                  })}
+                  onChange={(e) => updateComponentProps({ endTerminal: e.target.value as TerminalMark })}
                   value={comp.props.endTerminal ?? 'none'}
                 >
                   <option value="none">None (-)</option>
@@ -325,9 +320,7 @@ function PropertiesView({
                 {[0, 90, 180, 270].map((rot) => (
                   <button
                     key={rot}
-                    onClick={() => updateComponent(() => {
-                      comp.rotation = rot as 0 | 90 | 180 | 270;
-                    })}
+                    onClick={() => updateRotation(rot as Rotation)}
                     style={{ fontWeight: comp.rotation === rot ? 'bold' : undefined }}
                     type="button"
                   >
@@ -359,28 +352,27 @@ function useAppState(handle: ImperativeAppHandle | null) {
     setCurrentTool(currentToolState.tool);
     setCurrentDefId(currentToolState.defId);
     setSelectedIds(handle.getSelectedIds());
-    setPreamble(handle.latexDoc.preamble);
-    setBody(handle.latexDoc.body);
+    setPreamble(handle.getPreamble());
+    setBody(handle.getBody());
 
-    const unsubBody = handle.eventBus.on('body-changed', () => {
-      setBody(handle.latexDoc.body);
+    const unsubBody = handle.onBodyChange(() => {
+      setBody(handle.getBody());
       setDocumentVersion((version) => version + 1);
     });
-    const unsubTool = handle.eventBus.on('tool-changed', (event) => {
-      if (event.type !== 'tool-changed') return;
-      setCurrentTool(event.tool);
-      setCurrentDefId(event.defId);
+    const unsubTool = handle.onToolChange((tool, defId) => {
+      setCurrentTool(tool);
+      setCurrentDefId(defId);
     });
-    const unsubSelection = handle.eventBus.on('selection-changed', (event) => {
-      if (event.type !== 'selection-changed') return;
-      setSelectedIds(event.selectedIds);
+    const unsubSelection = handle.onSelectionChange((nextSelectedIds) => {
+      setSelectedIds(nextSelectedIds);
     });
-    const unsubDocument = handle.eventBus.on('document-changed', () => {
+    const unsubDocument = handle.onDocumentChange(() => {
       setDocumentVersion((version) => version + 1);
     });
-    const unsubEdited = handle.eventBus.on('user-edited-latex', () => {
+    const unsubEdited = handle.onLatexEdited(() => {
       setSelectedIds(handle.getSelectedIds());
-      setBody(handle.latexDoc.body);
+      setBody(handle.getBody());
+      setPreamble(handle.getPreamble());
       setDocumentVersion((version) => version + 1);
     });
     return () => {
@@ -394,10 +386,10 @@ function useAppState(handle: ImperativeAppHandle | null) {
 
   useEffect(() => {
     if (!handle) return;
-    const unsub = handle.eventBus.on('selection-changed', (event) => {
-      if (event.type !== 'selection-changed' || event.source === 'code') return;
-      if (event.selectedIds.length !== 1) return;
-      const lineIndex = lineIndexFromId(event.selectedIds[0]);
+    const unsub = handle.onSelectionChange((nextSelectedIds, source) => {
+      if (source === 'code') return;
+      if (nextSelectedIds.length !== 1) return;
+      const lineIndex = lineIndexFromId(nextSelectedIds[0]);
       if (lineIndex < 0) return;
       const textarea = documentTextareaRef.current;
       if (!textarea) return;
@@ -443,7 +435,7 @@ function useAppState(handle: ImperativeAppHandle | null) {
     for (let i = 0; i < textarea.selectionStart; i++) {
       if (textarea.value.charCodeAt(i) === 10) lineIndex++;
     }
-    handle.eventBus.emit({ type: 'code-caret-changed', lineIndex });
+    handle.selectSourceLine(lineIndex);
   };
 
   const onCopy = async () => {
@@ -546,10 +538,9 @@ function StatusBarView({ handle, currentTool }: { handle: ImperativeAppHandle | 
 
   useEffect(() => {
     if (!handle) return;
-    const unsub = handle.eventBus.on('cursor-grid-changed', (event) => {
-      if (event.type !== 'cursor-grid-changed') return;
-      setCoords({ x: event.gridPt.x, y: -event.gridPt.y });
-      setZoomPercent(event.zoomPercent);
+    const unsub = handle.onCursorGridChange((gridPt, nextZoomPercent) => {
+      setCoords({ x: gridPt.x, y: -gridPt.y });
+      setZoomPercent(nextZoomPercent);
     });
     return unsub;
   }, [handle]);
