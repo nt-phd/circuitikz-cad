@@ -1,7 +1,7 @@
-import type { GridPoint, WireInstance } from '../types';
+import type { GridPoint } from '../types';
 import { BaseTool } from './BaseTool';
-import { uid } from '../utils/uid';
 import { pointsEqual } from '../utils/geometry';
+import { formatCoord } from '../codegen/CoordFormatter';
 
 export class WireTool extends BaseTool {
   private points: GridPoint[] = [];
@@ -14,6 +14,7 @@ export class WireTool extends BaseTool {
     } else {
       const last = this.points[this.points.length - 1];
       if (pointsEqual(last, gridPt)) return;
+      // Manhattan routing: add corner point if diagonal
       if (last.x !== gridPt.x && last.y !== gridPt.y) {
         this.points.push({ x: gridPt.x, y: last.y });
       }
@@ -31,8 +32,7 @@ export class WireTool extends BaseTool {
       }
       preview.push(gridPt);
     }
-    const ghost = this.ctx.ghost.buildWireGhost(preview);
-    this.ctx.ghost.setGhostElement(ghost);
+    this.ctx.ghost.setGhostElement(this.ctx.ghost.buildWireGhost(preview));
   }
 
   onMouseUp(_gridPt: GridPoint, _e: MouseEvent): void {}
@@ -44,9 +44,8 @@ export class WireTool extends BaseTool {
 
   finishWire(): void {
     if (this.points.length >= 2) {
-      const wire: WireInstance = { id: uid('wire'), points: [...this.points], junctions: new Map() };
-      this.ctx.getDocument().addWire(wire);
-      this.ctx.emit({ type: 'document-changed' });
+      const coords = this.points.map(formatCoord).join(' -- ');
+      this.ctx.appendLine(`\\draw ${coords};`);
     }
     this.points = [];
     this.ctx.ghost.setGhostElement(null);

@@ -1,15 +1,12 @@
-import type { GridPoint, MonopoleInstance, Rotation } from '../types';
+import type { GridPoint, Rotation } from '../types';
 import { BaseTool } from './BaseTool';
-import { uid } from '../utils/uid';
-import { registry } from '../definitions/ComponentRegistry';
+import { formatCoord } from '../codegen/CoordFormatter';
 
 export class PlaceMonopoleTool extends BaseTool {
-  private defId: string;
   private rotation: Rotation = 0;
 
-  constructor(ctx: import('./BaseTool').ToolContext, defId: string) {
+  constructor(ctx: import('./BaseTool').ToolContext, private defId: string) {
     super(ctx);
-    this.defId = defId;
   }
 
   onMouseDown(gridPt: GridPoint, e: MouseEvent): void {
@@ -17,20 +14,7 @@ export class PlaceMonopoleTool extends BaseTool {
       this.ctx.ghost.setGhostElement(null);
       return;
     }
-
-    const def = registry.get(this.defId);
-    const comp: MonopoleInstance = {
-      id: uid('comp'),
-      defId: this.defId,
-      type: 'monopole',
-      position: { ...gridPt },
-      rotation: this.rotation,
-      props: def ? { ...def.defaultProps } : {},
-    };
-
-    this.ctx.getDocument().addComponent(comp);
-    this.ctx.emit({ type: 'document-changed' });
-    // Sticky: stay in tool, ready for next placement
+    this.ctx.appendLine(`\\draw ${formatCoord(gridPt)} node[${this.defId}] {};`);
   }
 
   onMouseMove(gridPt: GridPoint, _e: MouseEvent): void {

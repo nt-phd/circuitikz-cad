@@ -7,6 +7,8 @@ export interface ToolContext {
   hitTester: HitTester;
   emit: (event: import('../types').AppEvent) => void;
   getDocument: () => import('../model/CircuitDocument').CircuitDocument;
+  /** Append a \draw line to the tikzpicture body and trigger a render. */
+  appendLine: (line: string) => void;
 }
 
 export abstract class BaseTool {

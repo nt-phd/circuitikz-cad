@@ -4,6 +4,9 @@ import { BaseTool } from './BaseTool';
 export class DeleteTool extends BaseTool {
   onMouseDown(gridPt: GridPoint, e: MouseEvent): void {
     if (e.button !== 0) return;
+    // Hit-testing works on circuitDoc which is populated by the parser.
+    // Deletion from the raw body is not yet supported — the user can
+    // delete lines manually in the Document editor.
     const hitId = this.ctx.hitTester.hitTest(gridPt);
     if (hitId) {
       const doc = this.ctx.getDocument();

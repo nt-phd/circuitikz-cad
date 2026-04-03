@@ -8,7 +8,6 @@ import { EventBus } from './utils/events';
 import { registry } from './definitions/ComponentRegistry';
 import { LatexCanvas } from './canvas/LatexCanvas';
 import { ToolManager } from './tools/ToolManager';
-import { CircuiTikZEmitter } from './codegen/CircuiTikZEmitter';
 import { Toolbar } from './ui/Toolbar';
 import { ComponentPalette } from './ui/ComponentPalette';
 import { PropertyPanel } from './ui/PropertyPanel';
@@ -17,47 +16,24 @@ import { StatusBar } from './ui/StatusBar';
 import { parseCircuiTikZ } from './codegen/CircuiTikZParser';
 import type { ToolContext } from './tools/BaseTool';
 
-// ── Right-panel collapsible sections ──────────────────────────────────────────
 function initCollapsibleSections(): void {
   document.querySelectorAll('.rpanel-section-header').forEach(header => {
     header.addEventListener('click', () => {
-      const body = header.nextElementSibling as HTMLElement | null;
+      const sectionBody = header.nextElementSibling as HTMLElement | null;
       const chevron = header.querySelector('.rpanel-chevron') as HTMLElement | null;
-      if (!body) return;
-      const collapsed = body.classList.toggle('rpanel-section-body--collapsed');
+      if (!sectionBody) return;
+      const collapsed = sectionBody.classList.toggle('rpanel-section-body--collapsed');
       if (chevron) chevron.textContent = collapsed ? '▶' : '▼';
     });
   });
 }
 
-/**
- * Merge CAD-generated \draw lines into the existing body.
- *
- * The body is a tikzpicture block. CAD components are kept in a delimited
- * section between two comment markers so they can be replaced without
- * touching the user's hand-written TikZ.
- *
- * If the markers don't exist yet (first CAD placement), they are appended
- * just before \end{tikzpicture}.
- */
-const CAD_BEGIN = '% --- CAD BEGIN ---';
-const CAD_END   = '% --- CAD END ---';
-
-function mergeCadIntoBody(body: string, cadLines: string[]): string {
-  const cadBlock = cadLines.length > 0
-    ? `${CAD_BEGIN}\n${cadLines.map(l => `  ${l}`).join('\n')}\n${CAD_END}`
-    : `${CAD_BEGIN}\n${CAD_END}`;
-
-  if (body.includes(CAD_BEGIN)) {
-    // Replace existing CAD block
-    return body.replace(
-      new RegExp(`${CAD_BEGIN}[\\s\\S]*?${CAD_END}`),
-      cadBlock,
-    );
-  }
-
-  // Insert before \end{tikzpicture}
-  return body.replace(/\\end\{tikzpicture\}/, `${cadBlock}\n\\end{tikzpicture}`);
+/** Insert a line just before \end{tikzpicture} in the body. */
+function appendLineToBody(body: string, line: string): string {
+  const marker = '\\end{tikzpicture}';
+  const idx = body.lastIndexOf(marker);
+  if (idx === -1) return body + '\n' + line;
+  return body.slice(0, idx) + '  ' + line + '\n' + body.slice(idx);
 }
 
 async function init() {
@@ -70,7 +46,6 @@ async function init() {
   const circuitDoc = new CircuitDocument('european');
   const selection  = new SelectionState();
   const eventBus   = new EventBus();
-  const emitter    = new CircuiTikZEmitter(registry);
 
   const canvasContainer = document.getElementById('canvas-container')!;
   const canvas = new LatexCanvas(canvasContainer, latexDoc, circuitDoc, registry, selection);
@@ -80,6 +55,15 @@ async function init() {
     hitTester: canvas.hitTester,
     emit: (e) => eventBus.emit(e),
     getDocument: () => circuitDoc,
+
+    /** Append a LaTeX line to the body and trigger render. */
+    appendLine: (line: string) => {
+      latexDoc.body = appendLineToBody(latexDoc.body, line);
+      eventBus.emit({ type: 'body-changed' });   // sync textarea
+      parseCircuiTikZ(latexDoc.body, circuitDoc, registry); // keep hit-test in sync
+      canvas.refresh();
+      canvas.scheduleRender();
+    },
   };
 
   const toolManager = new ToolManager(toolCtx, canvas, selection, (e) => eventBus.emit(e));
@@ -101,22 +85,19 @@ async function init() {
   );
 
   /**
-   * CAD tool mutated circuitDoc.
-   * Merge the generated \draw lines into the CAD section of the body,
-   * leaving the user's hand-written TikZ untouched.
+   * document-changed: emitted by SelectTool (drag) and DeleteTool.
+   * These still modify circuitDoc directly, so we re-parse and re-render.
+   * NOTE: for these tools we do NOT regenerate the body from the model —
+   * drag/delete on parsed components is a best-effort feature.
    */
   eventBus.on('document-changed', () => {
-    const cadLines = emitter.emitLines(circuitDoc);
-    latexDoc.body = mergeCadIntoBody(latexDoc.body, cadLines);
-    eventBus.emit({ type: 'body-changed' });
     canvas.refresh();
     canvas.scheduleRender();
   });
 
   /**
-   * User finished typing in CodePanel (debounced).
-   * Parse whatever is in the body into circuitDoc so hit-test / drag work
-   * for any components the parser recognises.
+   * user-edited-latex: user finished typing in the Document or Preamble textarea.
+   * Re-parse body into circuitDoc and recompile.
    */
   eventBus.on('user-edited-latex', () => {
     parseCircuiTikZ(latexDoc.body, circuitDoc, registry);
