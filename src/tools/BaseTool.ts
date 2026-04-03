@@ -11,6 +11,8 @@ export interface ToolContext {
   getDef: (defId: string) => ComponentDef | undefined;
   /** Append a \draw line to the tikzpicture body and trigger a render. */
   appendLine: (line: string) => void;
+  /** Delete model elements and their corresponding LaTeX source lines. */
+  deleteElements: (ids: string[]) => void;
 }
 
 export abstract class BaseTool {

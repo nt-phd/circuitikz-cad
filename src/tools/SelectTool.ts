@@ -87,14 +87,7 @@ export class SelectTool extends BaseTool {
 
   onKeyDown(e: KeyboardEvent): void {
     if (e.key === 'Delete' || e.key === 'Backspace') {
-      const doc = this.ctx.getDocument();
-      for (const id of this.selection.getSelectedIds()) {
-        doc.removeComponent(id);
-        doc.removeWire(id);
-      }
-      this.selection.clear();
-      this.ctx.emit({ type: 'selection-changed', selectedIds: [], source: 'canvas' });
-      this.ctx.emit({ type: 'document-changed' });
+      this.ctx.deleteElements(this.selection.getSelectedIds());
     }
   }
 }

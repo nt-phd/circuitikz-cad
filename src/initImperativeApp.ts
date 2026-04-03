@@ -72,6 +72,15 @@ function updateBodyLinePreservingStructure(body: string, lineIndex: number, repl
   return lines.join('\n');
 }
 
+function removeBodyLines(body: string, lineIndices: number[]): string {
+  const lines = body.split('\n');
+  const sorted = [...new Set(lineIndices)].sort((a, b) => b - a);
+  for (const lineIndex of sorted) {
+    if (lineIndex >= 0 && lineIndex < lines.length) lines.splice(lineIndex, 1);
+  }
+  return lines.join('\n');
+}
+
 export interface ImperativeAppHandle {
   circuitDoc: CircuitDocument;
   eventBus: EventBus;
@@ -135,6 +144,22 @@ async function createImperativeApp(canvasContainer: HTMLElement): Promise<Impera
       latexDoc.body = appendLineToBody(latexDoc.body, line);
       syncTikzScale();
       parseCircuiTikZ(latexDoc.body, circuitDoc, registry);
+      eventBus.emit({ type: 'body-changed' });
+      canvas.refresh();
+      canvas.scheduleRender();
+    },
+    deleteElements: (ids: string[]) => {
+      if (ids.length === 0) return;
+      const lineIndices = ids.map(lineIndexFromId).filter((idx) => idx >= 0);
+      for (const id of ids) {
+        circuitDoc.removeComponent(id);
+        circuitDoc.removeWire(id);
+      }
+      latexDoc.body = removeBodyLines(latexDoc.body, lineIndices);
+      syncTikzScale();
+      parseCircuiTikZ(latexDoc.body, circuitDoc, registry);
+      selection.clear();
+      eventBus.emit({ type: 'selection-changed', selectedIds: [], source: 'canvas' });
       eventBus.emit({ type: 'body-changed' });
       canvas.refresh();
       canvas.scheduleRender();

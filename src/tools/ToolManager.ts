@@ -85,8 +85,23 @@ export class ToolManager {
     });
 
     window.addEventListener('keydown', (e: KeyboardEvent) => {
-      if ((e.target as HTMLElement).tagName === 'INPUT' ||
-          (e.target as HTMLElement).tagName === 'SELECT') return;
+      const target = e.target as HTMLElement | null;
+      if (
+        target?.tagName === 'INPUT' ||
+        target?.tagName === 'SELECT' ||
+        target?.tagName === 'TEXTAREA' ||
+        target?.isContentEditable
+      ) return;
+
+      if (e.key === 'Delete' || e.key === 'Backspace') {
+        const selectedIds = this.selection.getSelectedIds();
+        if (selectedIds.length > 0) {
+          e.preventDefault();
+          this.ctx.deleteElements(selectedIds);
+          return;
+        }
+      }
+
       this.currentTool.onKeyDown(e);
       if (e.key === 'Escape') this.setTool('select');
     });

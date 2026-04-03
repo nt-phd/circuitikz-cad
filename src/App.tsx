@@ -2,11 +2,15 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { ReactNode, RefObject } from 'react';
 import { initImperativeApp, type ImperativeAppHandle } from './initImperativeApp';
 import { lineIndexFromId } from './codegen/CircuiTikZParser';
-import { formatCoord } from './codegen/CoordFormatter';
-import { formatLabel } from './codegen/LabelFormatter';
 import type { ChangeEvent, KeyboardEvent as ReactKeyboardEvent, SyntheticEvent } from 'react';
 import type { ComponentDef, TerminalMark, ToolType, Rotation } from './types';
 import { SNAP_GRID } from './constants';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Textarea } from '@/components/ui/textarea';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Separator } from '@/components/ui/separator';
+import { cn } from '@/lib/utils';
 
 const GROUP_ORDER = [
   'Resistive bipoles',
@@ -57,15 +61,15 @@ function Section({
   grow?: boolean;
 }) {
   return (
-    <div className={`rpanel-section${grow ? ' rpanel-section--grow' : ''}`} id={sectionId}>
-      <div className="rpanel-section-header" onClick={onToggle}>
-        <span>{title}</span>
+    <Card className={cn('rpanel-section', grow && 'rpanel-section--grow')} id={sectionId}>
+      <CardHeader className="rpanel-section-header" onClick={onToggle}>
+        <CardTitle>{title}</CardTitle>
         <span className="rpanel-chevron">{collapsed ? '▶' : '▼'}</span>
-      </div>
-      <div className={`rpanel-section-body${collapsed ? ' rpanel-section-body--collapsed' : ''}`}>
+      </CardHeader>
+      <CardContent className={cn('rpanel-section-body', collapsed && 'rpanel-section-body--collapsed')}>
         {children}
-      </div>
-    </div>
+      </CardContent>
+    </Card>
   );
 }
 
@@ -81,17 +85,19 @@ function ToolbarView({
   return (
     <div className="toolbar">
       {TOOL_LABELS.map(({ id, label }) => (
-        <button
+        <Button
           key={id}
           className={currentTool === id ? 'active' : ''}
+          variant={currentTool === id ? 'default' : 'secondary'}
+          size="sm"
           onClick={() => onSelectTool(id)}
           type="button"
         >
           {label}
-        </button>
+        </Button>
       ))}
-      <div className="separator" />
-      <button onClick={onClear} type="button">Clear</button>
+      <Separator className="toolbar-separator" orientation="vertical" />
+      <Button onClick={onClear} size="sm" type="button" variant="secondary">Clear</Button>
     </div>
   );
 }
@@ -157,7 +163,7 @@ function LibraryView({
 
   return (
     <div id="palette">
-      <input
+      <Input
         className="palette-search"
         onChange={(e) => setQuery(e.target.value)}
         placeholder="Search component..."
@@ -169,15 +175,16 @@ function LibraryView({
           <div key={groupName}>
             <div className="category-title">{groupName}</div>
             {groups.get(groupName)?.map((def) => (
-              <button
+              <Button
                 key={def.id}
                 className={`comp-btn${currentDefId === def.id ? ' active' : ''}`}
                 onClick={() => onSelectTool(toolForDef(def), def.id)}
                 type="button"
+                variant="ghost"
               >
                 <span className="comp-name">{def.displayName}</span>
                 {def.shortcut ? <span className="shortcut">{def.shortcut.toUpperCase()}</span> : null}
-              </button>
+              </Button>
             ))}
           </div>
         ))}
@@ -239,7 +246,7 @@ function PropertiesView({
           <h3>Document</h3>
           <div className="prop-group">
             <label>Preamble</label>
-            <textarea
+            <Textarea
               className="code-textarea code-textarea--compact"
               onChange={(e) => setPreamble(e.target.value)}
               onKeyDown={stopShortcutPropagation}
@@ -256,7 +263,7 @@ function PropertiesView({
           <h3>{handle.registry.get(comp.defId)?.displayName ?? comp.defId}</h3>
           <div className="prop-group">
             <label>Label</label>
-            <input
+            <Input
               onChange={(e) => updateComponentProps({ label: e.target.value || undefined })}
               placeholder="$R_1$"
               type="text"
@@ -265,7 +272,7 @@ function PropertiesView({
           </div>
           <div className="prop-group">
             <label>Value</label>
-            <input
+            <Input
               onChange={(e) => updateComponentProps({ value: e.target.value || undefined })}
               type="text"
               value={comp.props.value ?? ''}
@@ -273,7 +280,7 @@ function PropertiesView({
           </div>
           <div className="prop-group">
             <label>Voltage (v=)</label>
-            <input
+            <Input
               onChange={(e) => updateComponentProps({ voltage: e.target.value || undefined })}
               type="text"
               value={comp.props.voltage ?? ''}
@@ -281,7 +288,7 @@ function PropertiesView({
           </div>
           <div className="prop-group">
             <label>Current (i=)</label>
-            <input
+            <Input
               onChange={(e) => updateComponentProps({ current: e.target.value || undefined })}
               type="text"
               value={comp.props.current ?? ''}
@@ -318,14 +325,15 @@ function PropertiesView({
               <label>Rotation</label>
               <div className="rotation-btns">
                 {[0, 90, 180, 270].map((rot) => (
-                  <button
+                  <Button
                     key={rot}
                     onClick={() => updateRotation(rot as Rotation)}
-                    style={{ fontWeight: comp.rotation === rot ? 'bold' : undefined }}
                     type="button"
+                    variant={comp.rotation === rot ? 'default' : 'secondary'}
+                    size="sm"
                   >
                     {rot}°
-                  </button>
+                  </Button>
                 ))}
               </div>
             </div>
@@ -496,7 +504,7 @@ function DocumentEditor({
       <div className="code-copy-row">
         <button className="copy-btn" onClick={() => void onCopy()} type="button">{copyLabel}</button>
       </div>
-      <textarea
+      <Textarea
         className="code-textarea"
         ref={documentTextareaRef}
         onChange={(e) => {

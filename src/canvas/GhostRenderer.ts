@@ -7,11 +7,16 @@ import type { GridPoint, BipoleInstance, ComponentInstance, ComponentDef, WireIn
 import type { ComponentRegistry } from '../definitions/ComponentRegistry';
 import type { SelectionState } from '../model/SelectionState';
 import type { CircuitDocument } from '../model/CircuitDocument';
-import { WIRE_WIDTH, SELECTION_COLOR, GHOST_OPACITY } from '../constants';
+import { SELECTION_COLOR, GHOST_OPACITY } from '../constants';
 import { scaleState } from './ScaleState';
-import { createGroup, createLine, createSvgElement, createRect } from '../utils/svg';
+import { createGroup, createLine, createRect } from '../utils/svg';
 
-const SVG_NS = 'http://www.w3.org/2000/svg';
+const OVERLAY_STROKE_WIDTH = 0.5;
+const SELECTION_LINE_OPACITY = 1;
+const GHOST_LINE_OPACITY = 0.8;
+const OVERLAY_BOX_OPACITY = 0.22;
+const GHOST_BOX_OPACITY = 0.18;
+const OVERLAY_CROSS_SIZE = 0.15;
 
 export class GhostRenderer {
   private ghostGroup: SVGGElement;
@@ -45,13 +50,33 @@ export class GhostRenderer {
     const gs = this.gs;
     const sx = start.x * gs, sy = start.y * gs;
     const ex = end.x   * gs, ey = end.y   * gs;
+    const def = this.registry.get(defId);
     const g = createGroup('ghost-bipole');
-    g.appendChild(createLine(sx, sy, ex, ey, {
-      stroke: SELECTION_COLOR, 'stroke-width': WIRE_WIDTH + 1,
-      'stroke-dasharray': '6 3', 'stroke-linecap': 'round',
+    if (def) {
+      const dx = ex - sx;
+      const dy = ey - sy;
+      const dist = Math.hypot(dx, dy);
+      const angleDeg = Math.atan2(dy, dx) * 180 / Math.PI;
+      const bodyPx = 2 * gs;
+      const scale = bodyPx / def.symbolPinSpan;
+      const bodyWidth = def.viewBoxW * scale;
+      const bodyHeight = Math.min(def.viewBoxH * scale, gs * 1.2);
+      const bodyX = dist / 2 - bodyWidth / 2;
+      const bodyY = -bodyHeight / 2;
+      const body = createGroup('ghost-bipole-body');
+      body.setAttribute('transform', `translate(${sx}, ${sy}) rotate(${angleDeg})`);
+      body.appendChild(createRect(bodyX, bodyY, bodyWidth, bodyHeight, {
+        fill: SELECTION_COLOR,
+        opacity: GHOST_BOX_OPACITY,
+      }));
+      g.appendChild(body);
+    }
+    g.appendChild(this.createOverlayLine(sx, sy, ex, ey, {
+      'stroke-dasharray': '4 3',
+      opacity: GHOST_LINE_OPACITY,
     }));
-    g.appendChild(this.dot(sx, sy));
-    g.appendChild(this.dot(ex, ey));
+    g.appendChild(this.crossAt(sx, sy, gs * OVERLAY_CROSS_SIZE, GHOST_LINE_OPACITY));
+    g.appendChild(this.crossAt(ex, ey, gs * OVERLAY_CROSS_SIZE, GHOST_LINE_OPACITY));
     return g;
   }
 
@@ -59,26 +84,24 @@ export class GhostRenderer {
     if (points.length < 2) return null;
     const gs = this.gs;
     const g = createGroup('ghost-wire');
+    for (const p of points) g.appendChild(this.crossAt(p.x * gs, p.y * gs, gs * OVERLAY_CROSS_SIZE, GHOST_LINE_OPACITY));
     for (let i = 0; i < points.length - 1; i++) {
       const a = points[i], b = points[i + 1];
-      g.appendChild(createLine(
+      g.appendChild(this.createOverlayLine(
         a.x * gs, a.y * gs, b.x * gs, b.y * gs,
-        { stroke: SELECTION_COLOR, 'stroke-width': WIRE_WIDTH,
-          'stroke-dasharray': '6 3', 'stroke-linecap': 'round' },
+        { 'stroke-dasharray': '4 3', opacity: GHOST_LINE_OPACITY },
       ));
     }
     return g;
   }
 
-  buildMonopoleGhost(defId: string, position: GridPoint, _rotation = 0): SVGGElement | null {
-    if (!this.registry.get(defId)) return null;
-    const gs = this.gs;
-    const px = position.x * gs, py = position.y * gs;
-    const size = gs * 0.4;
+  buildMonopoleGhost(defId: string, position: GridPoint, rotation = 0): SVGGElement | null {
+    const def = this.registry.get(defId);
+    if (!def) return null;
+    const ghost = this.buildPlacedComponentSelection(position.x, position.y, def, rotation, true);
+    if (!ghost) return null;
     const g = createGroup('ghost-monopole');
-    g.appendChild(createLine(px - size, py, px + size, py, { stroke: SELECTION_COLOR, 'stroke-width': 1.5 }));
-    g.appendChild(createLine(px, py - size, px, py + size, { stroke: SELECTION_COLOR, 'stroke-width': 1.5 }));
-    g.appendChild(this.dot(px, py));
+    g.appendChild(ghost);
     return g;
   }
 
@@ -107,12 +130,12 @@ export class GhostRenderer {
   private buildWireSelection(wire: WireInstance): SVGGElement {
     const gs = this.gs;
     const g = createGroup('sel-wire');
-    for (const p of wire.points) g.appendChild(this.crossAt(p.x * gs, p.y * gs, gs * 0.15));
+    for (const p of wire.points) g.appendChild(this.crossAt(p.x * gs, p.y * gs, gs * OVERLAY_CROSS_SIZE));
     for (let i = 0; i < wire.points.length - 1; i++) {
       const a = wire.points[i], b = wire.points[i + 1];
-      g.appendChild(createLine(
+      g.appendChild(this.createOverlayLine(
         a.x * gs, a.y * gs, b.x * gs, b.y * gs,
-        { stroke: SELECTION_COLOR, 'stroke-width': WIRE_WIDTH + 2, 'stroke-linecap': 'round' },
+        {},
       ));
     }
     return g;
@@ -139,17 +162,23 @@ export class GhostRenderer {
     const bodyY = -bodyHeight / 2;
     g.appendChild(createRect(bodyX, bodyY, bodyWidth, bodyHeight, {
       fill: SELECTION_COLOR,
-      opacity: 0.22,
+      opacity: OVERLAY_BOX_OPACITY,
     }));
     for (const pin of def.symbolPins ?? []) {
       const localX = dist / 2 + pin.x * scale;
       const localY = pin.y * scale;
-      g.appendChild(this.crossAt(localX, localY, gs * 0.15));
+      g.appendChild(this.crossAt(localX, localY, gs * OVERLAY_CROSS_SIZE));
     }
     return g;
   }
 
-  private buildPlacedComponentSelection(x: number, y: number, def: ComponentDef, rotation: number): SVGGElement {
+  private buildPlacedComponentSelection(
+    x: number,
+    y: number,
+    def: ComponentDef,
+    rotation: number,
+    ghost = false,
+  ): SVGGElement {
     const gs = this.gs;
     const cx = x * gs;
     const cy = y * gs;
@@ -163,14 +192,19 @@ export class GhostRenderer {
     const g = createGroup('sel-point');
     g.appendChild(createRect(left, top, width, height, {
       fill: SELECTION_COLOR,
-      opacity: 0.22,
+      opacity: ghost ? GHOST_BOX_OPACITY : OVERLAY_BOX_OPACITY,
     }));
     const pins = (def.symbolPins && def.symbolPins.length > 0)
       ? def.symbolPins
       : [{ name: 'reference', x: 0, y: 0 }];
     for (const pin of pins) {
       const projected = this.projectPlacedPin(cx, cy, pin.x * baseScale, pin.y * baseScale, rotation);
-      g.appendChild(this.crossAt(projected.x, projected.y, gs * 0.15));
+      g.appendChild(this.crossAt(
+        projected.x,
+        projected.y,
+        gs * OVERLAY_CROSS_SIZE,
+        ghost ? GHOST_LINE_OPACITY : SELECTION_LINE_OPACITY,
+      ));
     }
     return g;
   }
@@ -192,23 +226,26 @@ export class GhostRenderer {
     };
   }
 
-  private crossAt(x: number, y: number, halfSize: number): SVGGElement {
+  private crossAt(x: number, y: number, halfSize: number, opacity = 1): SVGGElement {
     const g = createGroup('sel-cross');
-    g.appendChild(createLine(x - halfSize, y - halfSize, x + halfSize, y + halfSize, {
-      stroke: SELECTION_COLOR, 'stroke-width': 0.5, 'stroke-linecap': 'butt',
-    }));
-    g.appendChild(createLine(x - halfSize, y + halfSize, x + halfSize, y - halfSize, {
-      stroke: SELECTION_COLOR, 'stroke-width': 0.5, 'stroke-linecap': 'butt',
-    }));
+    g.appendChild(this.createOverlayLine(x - halfSize, y - halfSize, x + halfSize, y + halfSize, { opacity }));
+    g.appendChild(this.createOverlayLine(x - halfSize, y + halfSize, x + halfSize, y - halfSize, { opacity }));
     return g;
   }
 
-  private dot(x: number, y: number): SVGCircleElement {
-    const c = document.createElementNS(SVG_NS, 'circle');
-    c.setAttribute('cx', String(x));
-    c.setAttribute('cy', String(y));
-    c.setAttribute('r', '3');
-    c.setAttribute('fill', SELECTION_COLOR);
-    return c;
+  private createOverlayLine(
+    x1: number,
+    y1: number,
+    x2: number,
+    y2: number,
+    attrs: Record<string, string | number> = {},
+  ): SVGLineElement {
+    return createLine(x1, y1, x2, y2, {
+      stroke: SELECTION_COLOR,
+      'stroke-width': OVERLAY_STROKE_WIDTH,
+      'stroke-linecap': 'butt',
+      'vector-effect': 'non-scaling-stroke',
+      ...attrs,
+    });
   }
 }
