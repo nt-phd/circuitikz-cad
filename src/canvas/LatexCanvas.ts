@@ -198,20 +198,24 @@ export class LatexCanvas {
   private buildGrid(): void {
     const defs = createSvgElement('defs') as SVGDefsElement;
 
-    // The overlay is inside worldDiv which already applies pan+zoom via CSS transform.
-    // So grid patterns use fixed GRID_SIZE coordinates — no scaling or pan offset needed.
+    // Dot-grid: one pattern tile of GRID_SIZE × GRID_SIZE.
+    // Minor dots at every grid point, major dots every MAJOR_GRID_EVERY units.
+    // The overlay is inside worldDiv so CSS transform already handles pan+zoom —
+    // pattern coordinates stay fixed in world space.
     const majorSize = GRID_SIZE * MAJOR_GRID_EVERY;
 
+    // Minor dot pattern (one dot per tile, at origin = top-left corner of tile)
     this.patternMinor = createSvgElement('pattern', {
       id: 'lc-grid-minor', patternUnits: 'userSpaceOnUse',
       x: 0, y: 0, width: GRID_SIZE, height: GRID_SIZE,
     }) as SVGPatternElement;
-    this.patternMinor.appendChild(createSvgElement('path', {
-      d: `M ${GRID_SIZE} 0 L 0 0 0 ${GRID_SIZE}`,
-      fill: 'none', stroke: GRID_COLOR_MINOR, 'stroke-width': '0.5',
+    this.patternMinor.appendChild(createSvgElement('circle', {
+      cx: 0, cy: 0, r: 0.75,
+      fill: GRID_COLOR_MINOR,
     }));
     defs.appendChild(this.patternMinor);
 
+    // Major dot pattern: fills with minor dots, then overlays a larger dot every N units
     this.patternMajor = createSvgElement('pattern', {
       id: 'lc-grid-major', patternUnits: 'userSpaceOnUse',
       x: 0, y: 0, width: majorSize, height: majorSize,
@@ -220,9 +224,10 @@ export class LatexCanvas {
       x: 0, y: 0, width: majorSize, height: majorSize,
       fill: 'url(#lc-grid-minor)',
     }));
-    this.patternMajor.appendChild(createSvgElement('path', {
-      d: `M ${majorSize} 0 L 0 0 0 ${majorSize}`,
-      fill: 'none', stroke: GRID_COLOR_MAJOR, 'stroke-width': '1',
+    // Larger dot at each major intersection (corners of the major tile)
+    this.patternMajor.appendChild(createSvgElement('circle', {
+      cx: 0, cy: 0, r: 1.5,
+      fill: GRID_COLOR_MAJOR,
     }));
     defs.appendChild(this.patternMajor);
 

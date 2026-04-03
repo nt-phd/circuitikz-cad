@@ -92,19 +92,19 @@ export function parseCircuiTikZ(
 
   doc.clear();
 
-  // Normalize: remove comments, collapse whitespace but keep line structure
+  // Normalize: remove comments, strip \begin/\end lines, collapse whitespace
   const lines = source
     .split('\n')
     .map(l => l.replace(/%.*$/, '').trim())
-    .filter(Boolean);
+    .filter(l => l && !/^\\(begin|end)\b/.test(l));
 
-  // Join into one string, then split on ';' to get draw statements
+  // Join into one string, then split on ';' to get individual statements
   const joined = lines.join(' ');
   const statements = joined.split(';').map(s => s.trim()).filter(Boolean);
 
   for (const stmt of statements) {
-    // Strip leading \draw or \draw[...]
-    const drawMatch = stmt.match(/^\\draw(?:\[.*?\])?\s+(.+)$/s);
+    // Find \draw anywhere in the statement (handles leading whitespace or stray tokens)
+    const drawMatch = stmt.match(/\\draw(?:\[.*?\])?\s+(.+)$/s);
     if (!drawMatch) continue;
     const body = drawMatch[1].trim();
 
