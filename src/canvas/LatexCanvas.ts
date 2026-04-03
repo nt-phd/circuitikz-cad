@@ -44,6 +44,7 @@ export class LatexCanvas {
 
   private renderInFlight = false;
   private renderPending = false;
+  private errorBanner: HTMLDivElement | null = null;
 
   // Grid SVG elements
   private patternMinor!: SVGPatternElement;
@@ -149,11 +150,14 @@ export class LatexCanvas {
       const data = await res.json() as { svg?: string; tx?: number; ty?: number; error?: string };
       if (data.svg) {
         this.injectSvg(data.svg, data.tx ?? 0, data.ty ?? 0);
+        this.showError(null);
       } else {
         console.warn('[LatexCanvas] render error:', data.error);
+        this.showError(data.error ?? 'LaTeX error');
       }
     } catch (e) {
       console.warn('[LatexCanvas] server unreachable:', e);
+      this.showError('Render server unreachable');
     } finally {
       this.renderInFlight = false;
       if (this.renderPending) this.doRender();
@@ -179,6 +183,23 @@ export class LatexCanvas {
     // In the SVG, TikZ origin is at (tx, ty) pt → (tx*PT_TO_PX, ty*PT_TO_PX) px
     this.latexDiv.style.left = (-tx * PT_TO_PX) + 'px';
     this.latexDiv.style.top  = (-ty * PT_TO_PX) + 'px';
+  }
+
+  // ====== ERROR BANNER ======
+
+  private showError(message: string | null): void {
+    if (!message) {
+      if (this.errorBanner) { this.errorBanner.remove(); this.errorBanner = null; }
+      return;
+    }
+    if (!this.errorBanner) {
+      this.errorBanner = document.createElement('div');
+      this.errorBanner.className = 'latex-error-banner';
+      this.container.appendChild(this.errorBanner);
+    }
+    // Show only the first ! error line for brevity
+    const firstError = message.split('\n').find(l => l.startsWith('!')) ?? message;
+    this.errorBanner.textContent = firstError.slice(0, 120);
   }
 
   // ====== GRID ======

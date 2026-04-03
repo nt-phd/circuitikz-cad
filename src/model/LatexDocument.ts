@@ -12,9 +12,6 @@ export const DEFAULT_PREAMBLE = `\\usepackage{amsmath}
 \\usepackage{amsfonts}
 \\usepackage{amssymb}
 
-\\usepackage{newpxtext}
-\\usepackage{newpxmath}
-
 \\usepackage{tikz}
 \\usepackage{circuitikz}
 \\usepackage{pgfplots}

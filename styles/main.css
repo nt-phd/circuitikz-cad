@@ -178,6 +178,25 @@ html, body {
   background: #fff;
 }
 
+/* LaTeX error banner */
+.latex-error-banner {
+  position: absolute;
+  bottom: 8px;
+  left: 8px;
+  right: 8px;
+  background: #c62828;
+  color: #fff;
+  font-family: 'Consolas', monospace;
+  font-size: 11px;
+  padding: 6px 10px;
+  border-radius: 4px;
+  z-index: 100;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  pointer-events: none;
+}
+
 /* World transform div: both layers share the same CSS transform */
 .world-transform {
   position: absolute;
