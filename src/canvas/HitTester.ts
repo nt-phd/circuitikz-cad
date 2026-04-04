@@ -2,7 +2,7 @@
  * Model-based hit testing — no DOM queries needed.
  * Works in grid coordinates (integer TikZ units).
  */
-import type { ConnectionRef, GridPoint } from '../types';
+import type { ConnectionRef, DrawingInstance, GridPoint } from '../types';
 import type { CircuitDocument } from '../model/CircuitDocument';
 import type { ComponentRegistry } from '../definitions/ComponentRegistry';
 import { getBipoleBodyMetrics, getPlacedComponentMetrics } from './ComponentGeometry';
@@ -62,6 +62,83 @@ function segmentIntersectsRect(
     segmentsIntersect(ax, ay, bx, by, right, bottom, left, bottom) ||
     segmentsIntersect(ax, ay, bx, by, left, bottom, left, top)
   );
+}
+
+function distanceToDrawing(drawing: DrawingInstance, pt: GridPoint): number {
+  switch (drawing.kind) {
+    case 'line':
+    case 'arrow':
+      return distPointToSegment(pt.x, pt.y, drawing.start.x, drawing.start.y, drawing.end.x, drawing.end.y);
+    case 'text':
+      return pointInRect(pt.x, pt.y, drawing.position.x - 0.5, drawing.position.y - 0.3, drawing.position.x + 0.5, drawing.position.y + 0.3)
+        ? 0
+        : Math.hypot(pt.x - drawing.position.x, pt.y - drawing.position.y);
+    case 'rectangle': {
+      const left = Math.min(drawing.start.x, drawing.end.x);
+      const right = Math.max(drawing.start.x, drawing.end.x);
+      const top = Math.min(drawing.start.y, drawing.end.y);
+      const bottom = Math.max(drawing.start.y, drawing.end.y);
+      if (pointInRect(pt.x, pt.y, left, top, right, bottom)) return 0;
+      return Math.min(
+        distPointToSegment(pt.x, pt.y, left, top, right, top),
+        distPointToSegment(pt.x, pt.y, right, top, right, bottom),
+        distPointToSegment(pt.x, pt.y, right, bottom, left, bottom),
+        distPointToSegment(pt.x, pt.y, left, bottom, left, top),
+      );
+    }
+    case 'circle': {
+      const d = Math.hypot(pt.x - drawing.center.x, pt.y - drawing.center.y);
+      return Math.abs(d - drawing.radius);
+    }
+    case 'bezier': {
+      let best = Infinity;
+      let prev = drawing.start;
+      for (let i = 1; i <= 16; i++) {
+        const t = i / 16;
+        const mt = 1 - t;
+        const sample = {
+          x: mt ** 3 * drawing.start.x + 3 * mt ** 2 * t * drawing.control1.x + 3 * mt * t ** 2 * drawing.control2.x + t ** 3 * drawing.end.x,
+          y: mt ** 3 * drawing.start.y + 3 * mt ** 2 * t * drawing.control1.y + 3 * mt * t ** 2 * drawing.control2.y + t ** 3 * drawing.end.y,
+        };
+        best = Math.min(best, distPointToSegment(pt.x, pt.y, prev.x, prev.y, sample.x, sample.y));
+        prev = sample;
+      }
+      return best;
+    }
+  }
+}
+
+function drawingIntersectsRect(drawing: DrawingInstance, left: number, top: number, right: number, bottom: number): boolean {
+  switch (drawing.kind) {
+    case 'line':
+    case 'arrow':
+      return segmentIntersectsRect(drawing.start.x, drawing.start.y, drawing.end.x, drawing.end.y, left, top, right, bottom);
+    case 'text':
+      return pointInRect(drawing.position.x, drawing.position.y, left, top, right, bottom);
+    case 'rectangle': {
+      const l = Math.min(drawing.start.x, drawing.end.x);
+      const r = Math.max(drawing.start.x, drawing.end.x);
+      const t = Math.min(drawing.start.y, drawing.end.y);
+      const b = Math.max(drawing.start.y, drawing.end.y);
+      return !(r < left || l > right || b < top || t > bottom);
+    }
+    case 'circle':
+      return !(drawing.center.x + drawing.radius < left || drawing.center.x - drawing.radius > right || drawing.center.y + drawing.radius < top || drawing.center.y - drawing.radius > bottom);
+    case 'bezier': {
+      let prev = drawing.start;
+      for (let i = 1; i <= 16; i++) {
+        const t = i / 16;
+        const mt = 1 - t;
+        const sample = {
+          x: mt ** 3 * drawing.start.x + 3 * mt ** 2 * t * drawing.control1.x + 3 * mt * t ** 2 * drawing.control2.x + t ** 3 * drawing.end.x,
+          y: mt ** 3 * drawing.start.y + 3 * mt ** 2 * t * drawing.control1.y + 3 * mt * t ** 2 * drawing.control2.y + t ** 3 * drawing.end.y,
+        };
+        if (segmentIntersectsRect(prev.x, prev.y, sample.x, sample.y, left, top, right, bottom)) return true;
+        prev = sample;
+      }
+      return false;
+    }
+  }
 }
 
 export class HitTester {
@@ -138,10 +215,15 @@ export class HitTester {
 
   /** Returns the id of the closest component/wire at gridPt, or null. */
   hitTest(gridPt: GridPoint): string | null {
+    return this.hitTestAmong(gridPt);
+  }
+
+  hitTestAmong(gridPt: GridPoint, allowedIds?: Set<string>): string | null {
     let best: string | null = null;
     let bestDist = HIT_THRESHOLD;
 
     for (const comp of this.doc.components) {
+      if (allowedIds && !allowedIds.has(comp.id)) continue;
       let d = Infinity;
       if (comp.type === 'bipole') {
         const def = this.registry.get(comp.defId);
@@ -156,9 +238,7 @@ export class HitTester {
         const relY = gridPt.y - comp.start.y;
         const localX = relX * ux + relY * uy;
         const localY = -relX * uy + relY * ux;
-        const { bodyWidth, bodyHeight } = getBipoleBodyMetrics(def, 1, dist);
-        const bodyX = dist / 2 - bodyWidth / 2;
-        const bodyY = -bodyHeight / 2;
+        const { bodyWidth, bodyHeight, bodyX, bodyY } = getBipoleBodyMetrics(def, 1, dist);
         if (
           localX >= bodyX &&
           localX <= bodyX + bodyWidth &&
@@ -191,12 +271,19 @@ export class HitTester {
     }
 
     for (const wire of this.doc.wires) {
+      if (allowedIds && !allowedIds.has(wire.id)) continue;
       for (let i = 0; i < wire.points.length - 1; i++) {
         const a = wire.points[i];
         const b = wire.points[i + 1];
         const d = distPointToSegment(gridPt.x, gridPt.y, a.x, a.y, b.x, b.y);
         if (d < bestDist) { bestDist = d; best = wire.id; }
       }
+    }
+
+    for (const drawing of this.doc.drawings) {
+      if (allowedIds && !allowedIds.has(drawing.id)) continue;
+      const d = distanceToDrawing(drawing, gridPt);
+      if (d < bestDist) { bestDist = d; best = drawing.id; }
     }
 
     return best;
@@ -219,9 +306,7 @@ export class HitTester {
         if (dist === 0) continue;
         const ux = dx / dist;
         const uy = dy / dist;
-        const { bodyWidth, bodyHeight } = getBipoleBodyMetrics(def, 1, dist);
-        const bodyX = dist / 2 - bodyWidth / 2;
-        const bodyY = -bodyHeight / 2;
+        const { bodyWidth, bodyHeight, bodyX, bodyY } = getBipoleBodyMetrics(def, 1, dist);
         const corners = [
           { x: bodyX, y: bodyY },
           { x: bodyX + bodyWidth, y: bodyY },
@@ -272,6 +357,10 @@ export class HitTester {
           break;
         }
       }
+    }
+
+    for (const drawing of this.doc.drawings) {
+      if (drawingIntersectsRect(drawing, left, top, right, bottom)) ids.push(drawing.id);
     }
 
     return ids;

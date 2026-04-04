@@ -12,7 +12,17 @@
  *   \draw (x,y) -- (x2,y2) -- ...;               → WireInstance
  */
 
-import type { ConnectionRef, GridPoint, BipoleInstance, MonopoleInstance, NodeInstance, WireInstance, ComponentProps, TerminalMark } from '../types';
+import type {
+  ConnectionRef,
+  GridPoint,
+  BipoleInstance,
+  MonopoleInstance,
+  NodeInstance,
+  WireInstance,
+  ComponentProps,
+  TerminalMark,
+  DrawingInstance,
+} from '../types';
 import type { CircuitDocument } from '../model/CircuitDocument';
 import type { ComponentRegistry } from '../definitions/ComponentRegistry';
 import { getComponentAnchorPoints } from '../canvas/ConnectionAnchors';
@@ -107,6 +117,54 @@ function parseWireStatement(
   };
 }
 
+function parseDrawingStatement(body: string, drawOptions: string | undefined): DrawingInstance | null {
+  const normalizedOpts = (drawOptions ?? '').trim();
+  const options = normalizedOpts || undefined;
+
+  const bezierMatch = body.match(/^(\([^)]+\))\s*\.\.\s*controls\s*(\([^)]+\))\s*and\s*(\([^)]+\))\s*\.\.\s*(\([^)]+\))$/);
+  if (bezierMatch) {
+    const start = parseCoord(bezierMatch[1]);
+    const control1 = parseCoord(bezierMatch[2]);
+    const control2 = parseCoord(bezierMatch[3]);
+    const end = parseCoord(bezierMatch[4]);
+    if (start && control1 && control2 && end) {
+      return { id: '', kind: 'bezier', start, control1, control2, end, props: { options } };
+    }
+  }
+
+  const rectMatch = body.match(/^(\([^)]+\))\s+rectangle\s+(\([^)]+\))$/);
+  if (rectMatch) {
+    const start = parseCoord(rectMatch[1]);
+    const end = parseCoord(rectMatch[2]);
+    if (start && end) return { id: '', kind: 'rectangle', start, end, props: { options } };
+  }
+
+  const circleMatch = body.match(/^(\([^)]+\))\s+circle\s*\(\s*([-\d.]+)\s*\)$/);
+  if (circleMatch) {
+    const center = parseCoord(circleMatch[1]);
+    const radius = Number.parseFloat(circleMatch[2]);
+    if (center && Number.isFinite(radius)) return { id: '', kind: 'circle', center, radius, props: { options } };
+  }
+
+  const simplePathMatch = body.match(/^(\([^)]+\))\s*(--)\s*(\([^)]+\))$/);
+  if (simplePathMatch && normalizedOpts) {
+    const start = parseCoord(simplePathMatch[1]);
+    const end = parseCoord(simplePathMatch[3]);
+    if (start && end) {
+      const kind = normalizedOpts.includes('->') ? 'arrow' : 'line';
+      return { id: '', kind, start, end, props: { options } };
+    }
+  }
+
+  const textNodeMatch = body.match(/^node(?:\[[^\]]*\])?\s+at\s+(\([^)]+\))\s*\{([\s\S]*)\}$/);
+  if (textNodeMatch) {
+    const position = parseCoord(textNodeMatch[1]);
+    if (position) return { id: '', kind: 'text', position, props: { text: textNodeMatch[2] } };
+  }
+
+  return null;
+}
+
 function parseTerminals(opts: string[]): { startTerminal?: TerminalMark; endTerminal?: TerminalMark } {
   for (const opt of opts) {
     const m = opt.trim().match(/^([*o]?)-([*o]?)$/);
@@ -123,7 +181,13 @@ function extractKV(opts: string[]): Record<string, string> {
   const result: Record<string, string> = {};
   for (const opt of opts) {
     const m = opt.trim().match(/^([a-zA-Z_]+)\s*=\s*(.+)$/);
-    if (m) result[m[1]] = m[2].trim();
+    if (m) {
+      let value = m[2].trim();
+      if (value.startsWith('{') && value.endsWith('}')) {
+        value = value.slice(1, -1).trim();
+      }
+      result[m[1]] = value;
+    }
   }
   return result;
 }
@@ -223,9 +287,26 @@ export function parseCircuiTikZ(
       continue;
     }
 
-    const drawMatch = stmt.match(/\\draw(?:\[.*?\])?\s+(.+)$/s);
+    const textNodeStmtMatch = stmt.match(/^\\node\s+at\s+(\([^)]+\))\s*\{([\s\S]*?)\}$/);
+    if (textNodeStmtMatch) {
+      const position = parseCoord(textNodeStmtMatch[1]);
+      if (position) {
+        doc.addDrawing({ id, kind: 'text', position, props: { text: textNodeStmtMatch[2] } });
+      }
+      continue;
+    }
+
+    const drawMatch = stmt.match(/^\\draw(?:\[([^\]]*)\])?\s+(.+)$/s);
     if (!drawMatch) continue;
-    const body = drawMatch[1].trim();
+    const drawOptions = drawMatch[1];
+    const body = drawMatch[2].trim();
+
+    const drawing = parseDrawingStatement(body, drawOptions);
+    if (drawing) {
+      drawing.id = id;
+      doc.addDrawing(drawing);
+      continue;
+    }
 
     // Wire: coords joined by --
     const wirePath = parseWireStatement(body, doc, registry);

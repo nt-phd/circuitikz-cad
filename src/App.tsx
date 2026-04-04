@@ -31,10 +31,11 @@ import {
   createTheme,
 } from '@mui/material';
 import SearchRoundedIcon from '@mui/icons-material/SearchRounded';
-import ContentCopyRoundedIcon from '@mui/icons-material/ContentCopyRounded';
+import DataObjectRoundedIcon from '@mui/icons-material/DataObjectRounded';
 import DownloadRoundedIcon from '@mui/icons-material/DownloadRounded';
 import ExpandMoreRoundedIcon from '@mui/icons-material/ExpandMoreRounded';
 import RouteRoundedIcon from '@mui/icons-material/RouteRounded';
+import RouteSharpIcon from '@mui/icons-material/RouteSharp';
 import DeleteOutlineRoundedIcon from '@mui/icons-material/DeleteOutlineRounded';
 import Grid4x4RoundedIcon from '@mui/icons-material/Grid4x4Rounded';
 import UndoRoundedIcon from '@mui/icons-material/UndoRounded';
@@ -47,10 +48,15 @@ import NavigationRoundedIcon from '@mui/icons-material/NavigationRounded';
 import ZoomInRoundedIcon from '@mui/icons-material/ZoomInRounded';
 import ZoomOutRoundedIcon from '@mui/icons-material/ZoomOutRounded';
 import FitScreenRoundedIcon from '@mui/icons-material/FitScreenRounded';
+import HorizontalRuleRoundedIcon from '@mui/icons-material/HorizontalRuleRounded';
+import ArrowRightAltRoundedIcon from '@mui/icons-material/ArrowRightAltRounded';
+import TextFieldsRoundedIcon from '@mui/icons-material/TextFieldsRounded';
+import CropSquareRoundedIcon from '@mui/icons-material/CropSquareRounded';
+import CircleOutlinedIcon from '@mui/icons-material/CircleOutlined';
 import type { ImperativeAppHandle } from './initImperativeApp';
 import { initImperativeApp } from './initImperativeApp';
 import { lineIndexFromId } from './codegen/CircuiTikZParser';
-import type { ComponentDef, Rotation, TerminalMark, ToolType } from './types';
+import type { ComponentDef, DrawingInstance, Rotation, TerminalMark, ToolType } from './types';
 import type { WireRoutingMode } from './types';
 const GROUP_ORDER = [
   'Resistive bipoles',
@@ -74,14 +80,13 @@ const GROUP_ORDER = [
 const TOOL_LABELS: Array<{ activeWhen: ToolType; icon: ReactNode; id: ToolType; label: string }> = [
   { id: 'move', activeWhen: 'move', label: 'Move', icon: <OpenWithRoundedIcon fontSize="small" /> },
   { id: 'select', activeWhen: 'select', label: 'Select', icon: <NavigationRoundedIcon fontSize="small" /> },
-  { id: 'wire', activeWhen: 'wire', label: 'Wire', icon: <RouteRoundedIcon fontSize="small" /> },
+  { id: 'wire', activeWhen: 'wire', label: 'Wire', icon: <RouteSharpIcon fontSize="small" /> },
   { id: 'delete', activeWhen: 'delete', label: 'Delete', icon: <DeleteOutlineRoundedIcon fontSize="small" /> },
 ];
 
 const DEFAULT_SIDEBAR_WIDTH = 360;
 const MIN_SIDEBAR_WIDTH = 280;
 const MAX_SIDEBAR_WIDTH = 640;
-const RECENT_LIBRARY_KEY = 'circuitikz-cad.library.recent';
 
 function toolForDef(def: ComponentDef): ToolType {
   return def.placementType === 'bipole'
@@ -89,6 +94,16 @@ function toolForDef(def: ComponentDef): ToolType {
     : def.placementType === 'monopole'
       ? 'place-monopole'
       : 'place-node';
+}
+
+function isEditTool(tool: ToolType): boolean {
+  return tool === 'select'
+    || tool === 'draw-line'
+    || tool === 'draw-arrow'
+    || tool === 'draw-text'
+    || tool === 'draw-rectangle'
+    || tool === 'draw-circle'
+    || tool === 'draw-bezier';
 }
 
 function formatGridCoord(value: number, pitch: number): string {
@@ -307,7 +322,7 @@ function ToolbarView({
           }}
           size="small"
           sx={{ alignSelf: 'center', '& .MuiToggleButton-root': toolbarToggleSx }}
-          value={currentTool}
+          value={isEditTool(currentTool) ? 'select' : currentTool}
         >
           {TOOL_LABELS.map(({ activeWhen, icon, id, label }) => (
             <Tooltip
@@ -329,6 +344,38 @@ function ToolbarView({
           ))}
         </ToggleButtonGroup>
         <Divider flexItem orientation="vertical" />
+        {isEditTool(currentTool) ? (
+          <>
+            <Typography color="text.secondary" sx={{ fontSize: 12, fontWeight: 600, letterSpacing: '0.04em' }} variant="caption">
+              Insert
+            </Typography>
+            <ToggleButtonGroup
+              exclusive
+              onChange={(_event, value: ToolType | null) => {
+                if (value) onSelectTool(value);
+              }}
+              size="small"
+              sx={{ alignSelf: 'center', '& .MuiToggleButton-root': toolbarToggleSx }}
+              value={currentTool === 'select' ? null : currentTool}
+            >
+              {[
+                ['draw-line', <HorizontalRuleRoundedIcon fontSize="small" />, 'Insert line'],
+                ['draw-arrow', <ArrowRightAltRoundedIcon fontSize="small" />, 'Insert arrow'],
+                ['draw-text', <TextFieldsRoundedIcon fontSize="small" />, 'Insert text'],
+                ['draw-rectangle', <CropSquareRoundedIcon fontSize="small" />, 'Insert rectangle'],
+                ['draw-circle', <CircleOutlinedIcon fontSize="small" />, 'Insert circle'],
+                ['draw-bezier', <RouteRoundedIcon fontSize="small" />, 'Insert bezier curve'],
+              ].map(([tool, icon, title]) => (
+                <Tooltip key={String(tool)} title={String(title)}>
+                  <ToggleButton aria-label={String(tool)} value={tool}>
+                    {icon}
+                  </ToggleButton>
+                </Tooltip>
+              ))}
+            </ToggleButtonGroup>
+            <Divider flexItem orientation="vertical" />
+          </>
+        ) : null}
         {currentTool === 'wire' ? (
           <>
             <Typography color="text.secondary" sx={{ fontSize: 12, fontWeight: 600, letterSpacing: '0.04em' }} variant="caption">
@@ -451,16 +498,8 @@ function LibraryView({
   onSelectTool: (tool: ToolType, defId?: string) => void;
 }) {
   const [query, setQuery] = useState('');
-  const [expandedGroups, setExpandedGroups] = useState<string[]>(['Recent']);
-  const [recentIds, setRecentIds] = useState<string[]>(() => {
-    if (typeof window === 'undefined') return [];
-    try {
-      const raw = window.localStorage.getItem(RECENT_LIBRARY_KEY);
-      return raw ? JSON.parse(raw) as string[] : [];
-    } catch {
-      return [];
-    }
-  });
+  const [expandedGroups, setExpandedGroups] = useState<string[]>(['In Use']);
+  const [inUseDefIds, setInUseDefIds] = useState<string[]>([]);
   const defs = useMemo(() => handle?.registry.getAll() ?? [], [handle]);
   const queryLower = query.trim().toLowerCase();
 
@@ -490,6 +529,20 @@ function LibraryView({
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [defs, handle, onSelectTool]);
 
+  useEffect(() => {
+    if (!handle) return;
+    const syncInUse = () => setInUseDefIds(handle.getInUseDefIds());
+    syncInUse();
+    const unsubBody = handle.onBodyChange(syncInUse);
+    const unsubDocument = handle.onDocumentChange(syncInUse);
+    const unsubLatex = handle.onLatexEdited(syncInUse);
+    return () => {
+      unsubBody();
+      unsubDocument();
+      unsubLatex();
+    };
+  }, [handle]);
+
   const filtered = queryLower
     ? defs.filter((def) =>
         def.displayName.toLowerCase().includes(queryLower) ||
@@ -499,9 +552,9 @@ function LibraryView({
     : defs;
 
   const defsById = useMemo(() => new Map(defs.map((def) => [def.id, def])), [defs]);
-  const recentDefs = useMemo(
-    () => recentIds.map((id) => defsById.get(id)).filter(Boolean) as ComponentDef[],
-    [defsById, recentIds],
+  const inUseDefs = useMemo(
+    () => inUseDefIds.map((id) => defsById.get(id)).filter(Boolean) as ComponentDef[],
+    [defsById, inUseDefIds],
   );
 
   const groups = new Map<string, ComponentDef[]>();
@@ -526,18 +579,6 @@ function LibraryView({
     event.preventDefault();
   };
 
-  const rememberRecent = (defId: string) => {
-    setRecentIds((prev) => {
-      const next = [defId, ...prev.filter((id) => id !== defId)].slice(0, 8);
-      try {
-        window.localStorage.setItem(RECENT_LIBRARY_KEY, JSON.stringify(next));
-      } catch {
-        // Ignore storage errors.
-      }
-      return next;
-    });
-  };
-
   const renderLibraryButton = (def: ComponentDef) => (
     <LibraryItemButton
       currentDefId={currentDefId}
@@ -545,7 +586,6 @@ function LibraryView({
       handle={handle}
       key={def.id}
       onActivate={() => {
-        rememberRecent(def.id);
         onSelectTool(toolForDef(def), def.id);
       }}
     />
@@ -590,14 +630,14 @@ function LibraryView({
           position: 'relative',
         }}
       >
-        {!queryLower && recentDefs.length > 0 ? (
+        {!queryLower && inUseDefs.length > 0 ? (
           <LibrarySection
-            expanded={expandedGroups.includes('Recent')}
-            groupName="Recent"
-            onToggle={() => toggleGroup('Recent')}
+            expanded={expandedGroups.includes('In Use')}
+            groupName="In Use"
+            onToggle={() => toggleGroup('In Use')}
           >
             <Stack spacing={0.5}>
-              {recentDefs.map(renderLibraryButton)}
+              {inUseDefs.map(renderLibraryButton)}
             </Stack>
           </LibrarySection>
         ) : null}
@@ -841,7 +881,39 @@ function PropertiesView({
   const selectionId = selectedIds[0];
   const selectionCount = selectedIds.length;
   const comp = handle.getSelectedComponent();
+  const drawing = handle.getSelectedDrawing();
   const wire = handle.getSelectedWire();
+  const [draftPreamble, setDraftPreamble] = useState(preamble);
+  const [draftComponentProps, setDraftComponentProps] = useState({
+    current: comp?.props.current ?? '',
+    label: comp?.props.label ?? '',
+    value: comp?.props.value ?? '',
+    voltage: comp?.props.voltage ?? '',
+  });
+  const [draftDrawingProps, setDraftDrawingProps] = useState({
+    options: drawing?.props.options ?? '',
+    text: drawing?.props.text ?? '',
+  });
+
+  useEffect(() => {
+    setDraftPreamble(preamble);
+  }, [preamble, selectionCount]);
+
+  useEffect(() => {
+    setDraftComponentProps({
+      current: comp?.props.current ?? '',
+      label: comp?.props.label ?? '',
+      value: comp?.props.value ?? '',
+      voltage: comp?.props.voltage ?? '',
+    });
+  }, [comp?.id, comp?.props.current, comp?.props.label, comp?.props.value, comp?.props.voltage, documentVersion]);
+
+  useEffect(() => {
+    setDraftDrawingProps({
+      options: drawing?.props.options ?? '',
+      text: drawing?.props.text ?? '',
+    });
+  }, [drawing?.id, drawing?.props.options, drawing?.props.text, documentVersion]);
 
   const updateComponentProps = (props: Record<string, string | undefined>) => {
     if (!selectionId) return;
@@ -853,6 +925,33 @@ function PropertiesView({
     if (!selectionId || rotation == null) return;
     handle.setComponentRotation(selectionId, rotation);
     handle.commitDocumentChange();
+  };
+
+  const updateDrawingProps = (props: Record<string, string | undefined>) => {
+    if (!selectionId) return;
+    handle.updateDrawingProps(selectionId, props);
+    handle.commitDocumentChange();
+  };
+
+  const commitPreamble = () => {
+    if (draftPreamble === preamble) return;
+    setPreamble(draftPreamble);
+  };
+
+  const commitComponentProp = (key: keyof typeof draftComponentProps) => {
+    if (!comp) return;
+    const nextValue = draftComponentProps[key] || undefined;
+    const currentValue = comp.props[key] ?? undefined;
+    if (nextValue === currentValue) return;
+    updateComponentProps({ [key]: nextValue });
+  };
+
+  const commitDrawingProp = (key: keyof typeof draftDrawingProps) => {
+    if (!drawing) return;
+    const nextValue = draftDrawingProps[key] || undefined;
+    const currentValue = drawing.props[key] ?? undefined;
+    if (nextValue === currentValue) return;
+    updateDrawingProps({ [key]: nextValue });
   };
 
   return (
@@ -876,7 +975,8 @@ function PropertiesView({
             fullWidth
             label="Preamble"
             multiline
-            onChange={(event) => setPreamble(event.target.value)}
+            onBlur={commitPreamble}
+            onChange={(event) => setDraftPreamble(event.target.value)}
             onKeyDown={stopShortcutPropagation}
             spellCheck={false}
             sx={{
@@ -889,7 +989,7 @@ function PropertiesView({
                 whiteSpace: 'pre',
               },
             }}
-            value={preamble}
+            value={draftPreamble}
             variant="outlined"
           />
         </>
@@ -907,40 +1007,78 @@ function PropertiesView({
         </Typography>
       ) : null}
 
+      {selectionCount === 1 && drawing ? (
+        <>
+          {drawing.kind === 'text' ? (
+            <TextField
+              fullWidth
+              label="Text"
+              onBlur={() => commitDrawingProp('text')}
+              onChange={(event) => setDraftDrawingProps((prev) => ({ ...prev, text: event.target.value }))}
+              onKeyDown={stopShortcutPropagation}
+              size="small"
+              value={draftDrawingProps.text}
+            />
+          ) : null}
+          {drawing.kind === 'circle' ? (
+            <TextField
+              disabled
+              fullWidth
+              label="Radius"
+              size="small"
+              value={String(drawing.radius)}
+            />
+          ) : null}
+          {drawing.kind !== 'text' ? (
+            <TextField
+              fullWidth
+              label="TikZ options"
+              onBlur={() => commitDrawingProp('options')}
+              onChange={(event) => setDraftDrawingProps((prev) => ({ ...prev, options: event.target.value }))}
+              onKeyDown={stopShortcutPropagation}
+              placeholder={drawing.kind === 'arrow' ? '->, thick' : 'thin'}
+              size="small"
+              value={draftDrawingProps.options}
+            />
+          ) : null}
+          <Typography color="text.secondary" variant="caption">
+            Edit geometry directly on the canvas by selecting and dragging.
+          </Typography>
+        </>
+      ) : null}
+
       {selectionCount === 1 && comp ? (
         <>
-          <TextField
-            fullWidth
-            label="Label"
-            onChange={(event) => updateComponentProps({ label: event.target.value || undefined })}
-            placeholder="$R_1$"
-            size="small"
-            value={comp.props.label ?? ''}
-          />
-          <TextField
-            fullWidth
-            label="Value"
-            onChange={(event) => updateComponentProps({ value: event.target.value || undefined })}
-            size="small"
-            value={comp.props.value ?? ''}
-          />
-          <TextField
-            fullWidth
-            label="Voltage (v=)"
-            onChange={(event) => updateComponentProps({ voltage: event.target.value || undefined })}
-            size="small"
-            value={comp.props.voltage ?? ''}
-          />
-          <TextField
-            fullWidth
-            label="Current (i=)"
-            onChange={(event) => updateComponentProps({ current: event.target.value || undefined })}
-            size="small"
-            value={comp.props.current ?? ''}
-          />
-
           {comp.type === 'bipole' ? (
             <>
+              <TextField
+                fullWidth
+                label="Label"
+                onBlur={() => commitComponentProp('label')}
+                onChange={(event) => setDraftComponentProps((prev) => ({ ...prev, label: event.target.value }))}
+                onKeyDown={stopShortcutPropagation}
+                placeholder="$R_1$"
+                size="small"
+                value={draftComponentProps.label}
+              />
+              <TextField
+                fullWidth
+                label="Voltage (v=)"
+                onBlur={() => commitComponentProp('voltage')}
+                onChange={(event) => setDraftComponentProps((prev) => ({ ...prev, voltage: event.target.value }))}
+                onKeyDown={stopShortcutPropagation}
+                size="small"
+                value={draftComponentProps.voltage}
+              />
+              <TextField
+                fullWidth
+                label="Current (i=)"
+                onBlur={() => commitComponentProp('current')}
+                onChange={(event) => setDraftComponentProps((prev) => ({ ...prev, current: event.target.value }))}
+                onKeyDown={stopShortcutPropagation}
+                size="small"
+                value={draftComponentProps.current}
+              />
               <FormControl fullWidth size="small">
                 <Select
                   displayEmpty
@@ -966,24 +1104,10 @@ function PropertiesView({
             </>
           ) : null}
 
-          {comp.type === 'monopole' ? (
-            <Box>
-              <Typography color="text.secondary" gutterBottom variant="caption">
-                Rotation
-              </Typography>
-              <ButtonGroup fullWidth size="small" variant="outlined">
-                {[0, 90, 180, 270].map((rot) => (
-                  <Button
-                    color={comp.rotation === rot ? 'primary' : 'inherit'}
-                    key={rot}
-                    onClick={(event) => updateRotation(event, rot as Rotation)}
-                    variant={comp.rotation === rot ? 'contained' : 'outlined'}
-                  >
-                    {rot}°
-                  </Button>
-                ))}
-              </ButtonGroup>
-            </Box>
+          {comp.type !== 'bipole' ? (
+            <Typography color="text.secondary" variant="caption">
+              No editable properties are wired yet for this component type. Selection and placement are supported; advanced options still need explicit emitter support.
+            </Typography>
           ) : null}
         </>
       ) : null}
@@ -1358,6 +1482,7 @@ function AppShell({
   });
   const selectedCount = appState.selectedIds.length;
   const selectedComponent = handle?.getSelectedComponent();
+  const selectedDrawing = handle?.getSelectedDrawing();
   const selectedWire = handle?.getSelectedWire();
   const propertiesTitle = selectedCount === 0
     ? 'Properties: Document'
@@ -1365,6 +1490,8 @@ function AppShell({
       ? `Properties: ${selectedCount} Selected`
       : selectedWire
         ? 'Properties: Wire'
+        : selectedDrawing
+          ? `Properties: ${selectedDrawing.kind[0].toUpperCase()}${selectedDrawing.kind.slice(1)}`
         : `Properties: ${handle?.registry.get(selectedComponent?.defId ?? '')?.displayName ?? selectedComponent?.defId ?? 'Component'}`;
 
   return (
@@ -1435,7 +1562,7 @@ function AppShell({
         <PanelSection
           actions={
             <>
-              <Button onClick={() => void appState.onCopy()} size="small" startIcon={<ContentCopyRoundedIcon fontSize="small" />} variant="outlined">
+              <Button onClick={() => void appState.onCopy()} size="small" startIcon={<DataObjectRoundedIcon fontSize="small" />} variant="outlined">
                 {appState.copyLabel}
               </Button>
               <Button onClick={appState.onDownloadSvg} size="small" startIcon={<DownloadRoundedIcon fontSize="small" />} variant="outlined">

@@ -3,7 +3,7 @@
  * Uses scaleState.effectiveGridSize so coordinates stay aligned with the
  * pdflatex-rendered SVG regardless of \begin{tikzpicture}[scale=...].
  */
-import type { GridPoint, BipoleInstance, ComponentInstance, ComponentDef, WireInstance } from '../types';
+import type { GridPoint, BipoleInstance, ComponentInstance, ComponentDef, DrawingInstance, WireInstance } from '../types';
 import type { ComponentRegistry } from '../definitions/ComponentRegistry';
 import type { SelectionState } from '../model/SelectionState';
 import type { CircuitDocument } from '../model/CircuitDocument';
@@ -184,7 +184,9 @@ export class GhostRenderer {
       const comp = this.doc.getComponent(id);
       if (comp) { this.renderComponentSelection(comp); continue; }
       const wire = this.doc.getWire(id);
-      if (wire) this.selectionGroup.appendChild(this.buildWireSelection(wire));
+      if (wire) { this.selectionGroup.appendChild(this.buildWireSelection(wire)); continue; }
+      const drawing = this.doc.getDrawing(id);
+      if (drawing) this.selectionGroup.appendChild(this.buildDrawingSelection(drawing));
     }
   }
 
@@ -212,6 +214,62 @@ export class GhostRenderer {
     return g;
   }
 
+  private buildDrawingSelection(drawing: DrawingInstance): SVGGElement {
+    const gs = this.gs;
+    const g = createGroup('sel-drawing');
+    switch (drawing.kind) {
+      case 'line':
+      case 'arrow':
+        g.appendChild(this.createOverlayLine(drawing.start.x * gs, drawing.start.y * gs, drawing.end.x * gs, drawing.end.y * gs, {}));
+        g.appendChild(this.crossAt(drawing.start.x * gs, drawing.start.y * gs, gs * OVERLAY_CROSS_SIZE));
+        g.appendChild(this.crossAt(drawing.end.x * gs, drawing.end.y * gs, gs * OVERLAY_CROSS_SIZE));
+        return g;
+      case 'text':
+        g.appendChild(this.crossAt(drawing.position.x * gs, drawing.position.y * gs, gs * OVERLAY_CROSS_SIZE));
+        return g;
+      case 'rectangle': {
+        const left = Math.min(drawing.start.x, drawing.end.x) * gs;
+        const top = Math.min(drawing.start.y, drawing.end.y) * gs;
+        const width = Math.abs(drawing.end.x - drawing.start.x) * gs;
+        const height = Math.abs(drawing.end.y - drawing.start.y) * gs;
+        g.appendChild(createRect(left, top, width, height, {
+          fill: 'none',
+          stroke: SELECTION_COLOR,
+          'stroke-width': OVERLAY_STROKE_WIDTH,
+          'vector-effect': 'non-scaling-stroke',
+        }));
+        g.appendChild(this.crossAt(drawing.start.x * gs, drawing.start.y * gs, gs * OVERLAY_CROSS_SIZE));
+        g.appendChild(this.crossAt(drawing.end.x * gs, drawing.end.y * gs, gs * OVERLAY_CROSS_SIZE));
+        return g;
+      }
+      case 'circle': {
+        const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+        circle.setAttribute('cx', String(drawing.center.x * gs));
+        circle.setAttribute('cy', String(drawing.center.y * gs));
+        circle.setAttribute('r', String(drawing.radius * gs));
+        circle.setAttribute('fill', 'none');
+        circle.setAttribute('stroke', SELECTION_COLOR);
+        circle.setAttribute('stroke-width', String(OVERLAY_STROKE_WIDTH));
+        circle.setAttribute('vector-effect', 'non-scaling-stroke');
+        g.appendChild(circle);
+        g.appendChild(this.crossAt(drawing.center.x * gs, drawing.center.y * gs, gs * OVERLAY_CROSS_SIZE));
+        return g;
+      }
+      case 'bezier': {
+        const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+        path.setAttribute('d', `M ${drawing.start.x * gs} ${drawing.start.y * gs} C ${drawing.control1.x * gs} ${drawing.control1.y * gs}, ${drawing.control2.x * gs} ${drawing.control2.y * gs}, ${drawing.end.x * gs} ${drawing.end.y * gs}`);
+        path.setAttribute('fill', 'none');
+        path.setAttribute('stroke', SELECTION_COLOR);
+        path.setAttribute('stroke-width', String(OVERLAY_STROKE_WIDTH));
+        path.setAttribute('vector-effect', 'non-scaling-stroke');
+        g.appendChild(path);
+        g.appendChild(this.crossAt(drawing.start.x * gs, drawing.start.y * gs, gs * OVERLAY_CROSS_SIZE));
+        g.appendChild(this.crossAt(drawing.end.x * gs, drawing.end.y * gs, gs * OVERLAY_CROSS_SIZE));
+        return g;
+      }
+    }
+  }
+
   private buildBipoleSelection(comp: BipoleInstance, def: ComponentDef): SVGGElement {
     const gs = this.gs;
     const sx = comp.start.x * gs;
@@ -222,18 +280,19 @@ export class GhostRenderer {
     const dy = ey - sy;
     const dist = Math.hypot(dx, dy);
     const angleDeg = Math.atan2(dy, dx) * 180 / Math.PI;
-    const probe = componentProbeService.getSelectionProbe(comp.id, comp, def, () => this.renderSelection());
-    if (probe) return this.buildProbeSelectionGroup(sx, sy, probe, false, angleDeg);
-
     const g = createGroup('sel-bipole');
     g.setAttribute('transform', `translate(${sx}, ${sy}) rotate(${angleDeg})`);
     const { bodyWidth, bodyHeight, bodyX, bodyY, pinScale } = getBipoleBodyMetrics(def, gs, dist);
-    for (const pin of def.symbolPins ?? []) {
-      const pinAbsX = def.symbolRefX + pin.x;
-      const localX = bodyX + (pinAbsX - (def.shapeBBoxX ?? 0)) * pinScale;
-      const localY = pin.y * pinScale;
-      g.appendChild(this.crossAt(localX, localY, gs * OVERLAY_CROSS_SIZE));
-    }
+    g.appendChild(createRect(bodyX, bodyY, bodyWidth, bodyHeight, {
+      fill: SELECTION_COLOR,
+      opacity: 0.12,
+    }));
+    g.appendChild(this.createOverlayLine(0, 0, dist, 0, {
+      'stroke-dasharray': '4 3',
+      opacity: GHOST_LINE_OPACITY,
+    }));
+    g.appendChild(this.crossAt(0, 0, gs * OVERLAY_CROSS_SIZE, GHOST_LINE_OPACITY));
+    g.appendChild(this.crossAt(dist, 0, gs * OVERLAY_CROSS_SIZE, GHOST_LINE_OPACITY));
     return g;
   }
 
@@ -269,12 +328,16 @@ export class GhostRenderer {
     const left = anchorX + leftOffset;
     const top = anchorY + topOffset;
     const g = createGroup('sel-point');
-    if (ghost) {
-      g.appendChild(createRect(left, top, width, height, {
-        fill: SELECTION_COLOR,
-        opacity: 0.12,
-      }));
-    }
+    g.appendChild(createRect(left, top, width, height, ghost ? {
+      fill: SELECTION_COLOR,
+      opacity: 0.12,
+    } : {
+      fill: SELECTION_COLOR,
+      opacity: 0.12,
+      stroke: SELECTION_COLOR,
+      'stroke-width': OVERLAY_STROKE_WIDTH,
+      'vector-effect': 'non-scaling-stroke',
+    }));
     if (ghost) {
       g.appendChild(this.crossAt(anchorX, anchorY, gs * OVERLAY_CROSS_SIZE, GHOST_LINE_OPACITY));
     } else {

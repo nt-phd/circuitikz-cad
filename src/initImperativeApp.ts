@@ -16,7 +16,7 @@ import { formatCoord } from './codegen/CoordFormatter';
 import { formatLabel } from './codegen/LabelFormatter';
 import { emitWirePath } from './codegen/WirePathEmitter';
 import { DEFAULT_BODY } from './model/LatexDocument';
-import type { ComponentInstance, WireInstance, TerminalMark, ToolType, Rotation, ComponentProps, WireRoutingMode } from './types';
+import type { ComponentInstance, DrawingInstance, WireInstance, TerminalMark, ToolType, Rotation, ComponentProps, WireRoutingMode } from './types';
 import type { ToolContext } from './tools/BaseTool';
 
 let initialized = false;
@@ -63,6 +63,23 @@ function emitWireLine(wire: WireInstance): string {
   return `\\draw ${emitWirePath(wire)};`;
 }
 
+function emitDrawingLine(drawing: DrawingInstance): string {
+  switch (drawing.kind) {
+    case 'line':
+      return `\\draw[${drawing.props.options || 'thin'}] ${formatCoord(drawing.start)} -- ${formatCoord(drawing.end)};`;
+    case 'arrow':
+      return `\\draw[${drawing.props.options || '->'}] ${formatCoord(drawing.start)} -- ${formatCoord(drawing.end)};`;
+    case 'text':
+      return `\\node at ${formatCoord(drawing.position)} {${drawing.props.text ?? 'Text'}};`;
+    case 'rectangle':
+      return `\\draw[${drawing.props.options || 'thin'}] ${formatCoord(drawing.start)} rectangle ${formatCoord(drawing.end)};`;
+    case 'circle':
+      return `\\draw[${drawing.props.options || 'thin'}] ${formatCoord(drawing.center)} circle (${drawing.radius});`;
+    case 'bezier':
+      return `\\draw[${drawing.props.options || 'thin'}] ${formatCoord(drawing.start)} .. controls ${formatCoord(drawing.control1)} and ${formatCoord(drawing.control2)} .. ${formatCoord(drawing.end)};`;
+  }
+}
+
 function updateBodyLinePreservingStructure(body: string, lineIndex: number, replacement: string, kind: 'component' | 'wire'): string {
   const lines = body.split('\n');
   if (lineIndex < 0 || lineIndex >= lines.length) return body;
@@ -101,7 +118,9 @@ export interface ImperativeAppHandle {
   getFullLatexSource: () => string;
   getRenderedSvg: () => string | null;
   getLibraryPreviewProbe: (defId: string, onResolved: () => void) => ComponentRenderProbe | null;
+  getInUseDefIds: () => string[];
   getSelectedComponent: () => ComponentInstance | undefined;
+  getSelectedDrawing: () => DrawingInstance | undefined;
   getSelectedWire: () => WireInstance | undefined;
   getGridVisible: () => boolean;
   getGridPitch: () => number;
@@ -120,6 +139,7 @@ export interface ImperativeAppHandle {
   setPreamble: (preamble: string) => void;
   setBody: (body: string) => void;
   updateComponentProps: (id: string, props: Partial<ComponentProps>) => void;
+  updateDrawingProps: (id: string, props: Record<string, string | undefined>) => void;
   setComponentRotation: (id: string, rotation: Rotation) => void;
   undo: () => void;
   commitLatexEdits: () => void;
@@ -156,13 +176,26 @@ async function createImperativeApp(canvasContainer: HTMLElement): Promise<Impera
     canvas.updateGridScale();
   };
 
+  const existingSelectableIds = (): Set<string> => new Set([
+    ...circuitDoc.components.map((comp) => comp.id),
+    ...circuitDoc.wires.map((wire) => wire.id),
+    ...circuitDoc.drawings.map((drawing) => drawing.id),
+  ]);
+
+  const reconcileSelection = (source: 'programmatic' | 'canvas' | 'code') => {
+    const previous = selection.getSelectedIds();
+    const existing = existingSelectableIds();
+    const next = previous.filter((id) => existing.has(id));
+    selection.setSelectedIds(next);
+    eventBus.emit({ type: 'selection-changed', selectedIds: next, source });
+  };
+
   const applyFullSource = (source: string) => {
     latexDoc.loadFromSource(source);
     syncTikzScale();
     componentProbeService.invalidate();
     parseCircuiTikZ(latexDoc.body, circuitDoc, registry);
-    selection.clear();
-    eventBus.emit({ type: 'selection-changed', selectedIds: [], source: 'programmatic' });
+    reconcileSelection('programmatic');
     eventBus.emit({ type: 'body-changed' });
     canvas.refresh();
     canvas.scheduleRender();
@@ -199,6 +232,7 @@ async function createImperativeApp(canvasContainer: HTMLElement): Promise<Impera
       for (const id of ids) {
         circuitDoc.removeComponent(id);
         circuitDoc.removeWire(id);
+        circuitDoc.removeDrawing(id);
       }
       latexDoc.body = removeBodyLines(latexDoc.body, lineIndices);
       syncTikzScale();
@@ -228,7 +262,7 @@ async function createImperativeApp(canvasContainer: HTMLElement): Promise<Impera
   eventBus.on('code-caret-changed', (e) => {
     if (e.type !== 'code-caret-changed') return;
     const id = `line:${e.lineIndex}`;
-    const selectedIds = (circuitDoc.getComponent(id) || circuitDoc.getWire(id)) ? [id] : [];
+    const selectedIds = (circuitDoc.getComponent(id) || circuitDoc.getWire(id) || circuitDoc.getDrawing(id)) ? [id] : [];
     eventBus.emit({ type: 'selection-changed', selectedIds, source: 'code' });
   });
 
@@ -246,6 +280,8 @@ async function createImperativeApp(canvasContainer: HTMLElement): Promise<Impera
       }
       const wire = circuitDoc.getWire(id);
       if (wire) nextBody = updateBodyLinePreservingStructure(nextBody, lineIdx, emitWireLine(wire), 'wire');
+      const drawing = circuitDoc.getDrawing(id);
+      if (drawing) nextBody = updateBodyLinePreservingStructure(nextBody, lineIdx, emitDrawingLine(drawing), 'wire');
     }
     latexDoc.body = nextBody;
     syncTikzScale();
@@ -256,10 +292,12 @@ async function createImperativeApp(canvasContainer: HTMLElement): Promise<Impera
   });
 
   eventBus.on('user-edited-latex', () => {
+    const previousSelection = selection.getSelectedIds();
     syncTikzScale();
     componentProbeService.invalidate();
     parseCircuiTikZ(latexDoc.body, circuitDoc, registry);
-    selection.clear();
+    selection.setSelectedIds(previousSelection);
+    reconcileSelection('programmatic');
     canvas.refresh();
     canvas.scheduleRender();
   });
@@ -306,9 +344,14 @@ async function createImperativeApp(canvasContainer: HTMLElement): Promise<Impera
       }
       return componentProbeService.getPlacedGhostProbe(def, 0, onResolved);
     },
+    getInUseDefIds: () => [...new Set(circuitDoc.components.map((comp) => comp.defId))],
     getSelectedComponent: () => {
       const [id] = selection.getSelectedIds();
       return id ? circuitDoc.getComponent(id) : undefined;
+    },
+    getSelectedDrawing: () => {
+      const [id] = selection.getSelectedIds();
+      return id ? circuitDoc.getDrawing(id) : undefined;
     },
     getSelectedWire: () => {
       const [id] = selection.getSelectedIds();
@@ -356,6 +399,11 @@ async function createImperativeApp(canvasContainer: HTMLElement): Promise<Impera
       const comp = circuitDoc.getComponent(id);
       if (!comp) return;
       Object.assign(comp.props, props);
+    },
+    updateDrawingProps: (id, props) => {
+      const drawing = circuitDoc.getDrawing(id);
+      if (!drawing) return;
+      drawing.props = { ...drawing.props, ...props };
     },
     setComponentRotation: (id, rotation) => {
       const comp = circuitDoc.getComponent(id);

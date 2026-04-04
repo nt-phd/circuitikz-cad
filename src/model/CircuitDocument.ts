@@ -1,8 +1,9 @@
-import type { ComponentInstance, WireInstance, DocumentMetadata } from '../types';
+import type { ComponentInstance, DrawingInstance, WireInstance, DocumentMetadata } from '../types';
 import { GRID_SIZE, SNAP_GRID, DEFAULT_STYLE } from '../constants';
 
 export class CircuitDocument {
   components: ComponentInstance[] = [];
+  drawings: DrawingInstance[] = [];
   wires: WireInstance[] = [];
   metadata: DocumentMetadata;
 
@@ -54,8 +55,21 @@ export class CircuitDocument {
     return this.wires.find(w => w.id === id);
   }
 
+  addDrawing(d: DrawingInstance): void {
+    this.drawings.push(d);
+  }
+
+  removeDrawing(id: string): void {
+    this.drawings = this.drawings.filter((d) => d.id !== id);
+  }
+
+  getDrawing(id: string): DrawingInstance | undefined {
+    return this.drawings.find((d) => d.id === id);
+  }
+
   clear(): void {
     this.components = [];
+    this.drawings = [];
     this.wires = [];
   }
 }

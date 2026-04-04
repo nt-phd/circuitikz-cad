@@ -1,4 +1,4 @@
-import type { BipoleInstance, MonopoleInstance, NodeInstance, WireInstance, TerminalMark } from '../types';
+import type { BipoleInstance, MonopoleInstance, NodeInstance, WireInstance, TerminalMark, DrawingInstance } from '../types';
 import type { CircuitDocument } from '../model/CircuitDocument';
 import type { ComponentRegistry } from '../definitions/ComponentRegistry';
 import { formatCoord } from './CoordFormatter';
@@ -27,6 +27,11 @@ export class CircuiTikZEmitter {
 
     for (const w of doc.wires) {
       const l = this.emitWire(w);
+      if (l) lines.push(l);
+    }
+
+    for (const drawing of doc.drawings) {
+      const l = this.emitDrawing(drawing);
       if (l) lines.push(l);
     }
 
@@ -72,6 +77,23 @@ export class CircuiTikZEmitter {
   private emitPlacedNode(comp: MonopoleInstance | NodeInstance, tikzName: string): string {
     const nodeName = comp.nodeName ? `(${comp.nodeName})` : '';
     return `\\node[${tikzName}]${nodeName} at ${formatCoord(comp.position)} {};`;
+  }
+
+  private emitDrawing(drawing: DrawingInstance): string {
+    switch (drawing.kind) {
+      case 'line':
+        return `\\draw[${drawing.props.options || 'thin'}] ${formatCoord(drawing.start)} -- ${formatCoord(drawing.end)};`;
+      case 'arrow':
+        return `\\draw[${drawing.props.options || '->'}] ${formatCoord(drawing.start)} -- ${formatCoord(drawing.end)};`;
+      case 'text':
+        return `\\node at ${formatCoord(drawing.position)} {${drawing.props.text ?? 'Text'}};`;
+      case 'rectangle':
+        return `\\draw[${drawing.props.options || 'thin'}] ${formatCoord(drawing.start)} rectangle ${formatCoord(drawing.end)};`;
+      case 'circle':
+        return `\\draw[${drawing.props.options || 'thin'}] ${formatCoord(drawing.center)} circle (${drawing.radius});`;
+      case 'bezier':
+        return `\\draw[${drawing.props.options || 'thin'}] ${formatCoord(drawing.start)} .. controls ${formatCoord(drawing.control1)} and ${formatCoord(drawing.control2)} .. ${formatCoord(drawing.end)};`;
+    }
   }
 
   private terminalString(start?: TerminalMark, end?: TerminalMark): string {

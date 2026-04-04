@@ -6,6 +6,7 @@ import { PlaceBipoleTool } from './PlaceBipoleTool';
 import { PlaceMonopoleTool } from './PlaceMonopoleTool';
 import { WireTool } from './WireTool';
 import { DeleteTool } from './DeleteTool';
+import { DrawShapeTool } from './DrawShapeTool';
 import type { LatexCanvas } from '../canvas/LatexCanvas';
 import type { SelectionState } from '../model/SelectionState';
 
@@ -62,6 +63,30 @@ export class ToolManager {
       case 'delete':
         this.currentTool = new DeleteTool(this.ctx);
         overlay.style.cursor = 'default';
+        break;
+      case 'draw-line':
+        this.currentTool = new DrawShapeTool(this.ctx, 'line');
+        overlay.style.cursor = 'crosshair';
+        break;
+      case 'draw-arrow':
+        this.currentTool = new DrawShapeTool(this.ctx, 'arrow');
+        overlay.style.cursor = 'crosshair';
+        break;
+      case 'draw-text':
+        this.currentTool = new DrawShapeTool(this.ctx, 'text');
+        overlay.style.cursor = 'crosshair';
+        break;
+      case 'draw-rectangle':
+        this.currentTool = new DrawShapeTool(this.ctx, 'rectangle');
+        overlay.style.cursor = 'crosshair';
+        break;
+      case 'draw-circle':
+        this.currentTool = new DrawShapeTool(this.ctx, 'circle');
+        overlay.style.cursor = 'crosshair';
+        break;
+      case 'draw-bezier':
+        this.currentTool = new DrawShapeTool(this.ctx, 'bezier');
+        overlay.style.cursor = 'crosshair';
         break;
     }
 

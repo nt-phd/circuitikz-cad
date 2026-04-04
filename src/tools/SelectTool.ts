@@ -1,15 +1,25 @@
-import type { GridPoint, BipoleInstance, MonopoleInstance, WireInstance } from '../types';
+import type { GridPoint, BipoleInstance, MonopoleInstance, WireInstance, DrawingInstance } from '../types';
 import { BaseTool } from './BaseTool';
 import type { SelectionState } from '../model/SelectionState';
 
 export class SelectTool extends BaseTool {
+  private static readonly BIPOLE_ENDPOINT_HIT_RADIUS = 0.5;
   private selection: SelectionState;
   private isDragging = false;
   private isMarqueeSelecting = false;
   private hasDragged = false;
   private dragStartGrid: GridPoint | null = null;
+  private dragBipoleEndpoint: { id: string; endpoint: 'start' | 'end' } | null = null;
   private marqueeCurrentGrid: GridPoint | null = null;
-  private dragOriginalPositions = new Map<string, { start?: GridPoint; end?: GridPoint; position?: GridPoint; points?: GridPoint[] }>();
+  private dragOriginalPositions = new Map<string, {
+    start?: GridPoint;
+    end?: GridPoint;
+    position?: GridPoint;
+    points?: GridPoint[];
+    center?: GridPoint;
+    control1?: GridPoint;
+    control2?: GridPoint;
+  }>();
   private marqueeBaseSelection = new Set<string>();
   private marqueeMode: 'replace' | 'add' | 'toggle' = 'replace';
 
@@ -21,7 +31,27 @@ export class SelectTool extends BaseTool {
   onMouseDown(gridPt: GridPoint, e: MouseEvent): void {
     if (e.button !== 0) return;
 
-    const hitId = this.ctx.hitTester.hitTest(gridPt);
+    const endpointTarget = this.findSelectedBipoleEndpoint(gridPt);
+    if (endpointTarget) {
+      const hitComp = this.ctx.getDocument().getComponent(endpointTarget.id);
+      if (hitComp?.type === 'bipole') {
+        this.isMarqueeSelecting = false;
+        this.isDragging = true;
+        this.hasDragged = false;
+        this.dragStartGrid = gridPt;
+        this.dragBipoleEndpoint = endpointTarget;
+        this.dragOriginalPositions.clear();
+        this.dragOriginalPositions.set(endpointTarget.id, { start: { ...hitComp.start }, end: { ...hitComp.end } });
+        this.ctx.emit({ type: 'selection-changed', selectedIds: this.selection.getSelectedIds(), source: 'canvas' });
+        return;
+      }
+    }
+
+    const selectedIds = this.selection.getSelectedIds();
+    const selectedHitId = selectedIds.length > 0
+      ? this.ctx.hitTester.hitTestAmong(gridPt, new Set(selectedIds))
+      : null;
+    const hitId = selectedHitId ?? this.ctx.hitTester.hitTest(gridPt);
 
     if (hitId) {
       this.isMarqueeSelecting = false;
@@ -33,6 +63,7 @@ export class SelectTool extends BaseTool {
       this.isDragging = true;
       this.hasDragged = false;
       this.dragStartGrid = gridPt;
+      this.dragBipoleEndpoint = null;
 
       this.dragOriginalPositions.clear();
       for (const id of this.selection.getSelectedIds()) {
@@ -48,6 +79,31 @@ export class SelectTool extends BaseTool {
         const wire = this.ctx.getDocument().getWire(id);
         if (wire) {
           this.dragOriginalPositions.set(id, { points: wire.points.map((point) => ({ ...point })) });
+          continue;
+        }
+        const drawing = this.ctx.getDocument().getDrawing(id);
+        if (drawing) {
+          switch (drawing.kind) {
+            case 'line':
+            case 'arrow':
+            case 'rectangle':
+              this.dragOriginalPositions.set(id, { start: { ...drawing.start }, end: { ...drawing.end } });
+              break;
+            case 'text':
+              this.dragOriginalPositions.set(id, { position: { ...drawing.position } });
+              break;
+            case 'circle':
+              this.dragOriginalPositions.set(id, { center: { ...drawing.center } });
+              break;
+            case 'bezier':
+              this.dragOriginalPositions.set(id, {
+                start: { ...drawing.start },
+                end: { ...drawing.end },
+                control1: { ...drawing.control1 },
+                control2: { ...drawing.control2 },
+              });
+              break;
+          }
         }
       }
       this.ctx.emit({ type: 'selection-changed', selectedIds: this.selection.getSelectedIds(), source: 'canvas' });
@@ -92,6 +148,21 @@ export class SelectTool extends BaseTool {
 
     this.hasDragged = true;
     const doc = this.ctx.getDocument();
+    if (this.dragBipoleEndpoint) {
+      const comp = doc.getComponent(this.dragBipoleEndpoint.id);
+      const orig = this.dragOriginalPositions.get(this.dragBipoleEndpoint.id);
+      if (comp?.type === 'bipole' && orig?.start && orig?.end) {
+        if (this.dragBipoleEndpoint.endpoint === 'start') {
+          comp.start = { x: orig.start.x + dx, y: orig.start.y + dy };
+          comp.end = { ...orig.end };
+        } else {
+          comp.start = { ...orig.start };
+          comp.end = { x: orig.end.x + dx, y: orig.end.y + dy };
+        }
+        this.ctx.emit({ type: 'selection-changed', selectedIds: this.selection.getSelectedIds(), source: 'canvas' });
+      }
+      return;
+    }
     for (const [id, orig] of this.dragOriginalPositions) {
       const comp = doc.getComponent(id);
       if (comp && comp.type === 'bipole' && orig.start && orig.end) {
@@ -103,6 +174,34 @@ export class SelectTool extends BaseTool {
         const wire = doc.getWire(id);
         if (wire && orig.points) {
           (wire as WireInstance).points = orig.points.map((point) => ({ x: point.x + dx, y: point.y + dy }));
+          continue;
+        }
+        const drawing = doc.getDrawing(id);
+        if (drawing) {
+          switch (drawing.kind) {
+            case 'line':
+            case 'arrow':
+            case 'rectangle':
+              if (orig.start && orig.end) {
+                drawing.start = { x: orig.start.x + dx, y: orig.start.y + dy };
+                drawing.end = { x: orig.end.x + dx, y: orig.end.y + dy };
+              }
+              break;
+            case 'text':
+              if (orig.position) drawing.position = { x: orig.position.x + dx, y: orig.position.y + dy };
+              break;
+            case 'circle':
+              if (orig.center) drawing.center = { x: orig.center.x + dx, y: orig.center.y + dy };
+              break;
+            case 'bezier':
+              if (orig.start && orig.end && orig.control1 && orig.control2) {
+                drawing.start = { x: orig.start.x + dx, y: orig.start.y + dy };
+                drawing.end = { x: orig.end.x + dx, y: orig.end.y + dy };
+                drawing.control1 = { x: orig.control1.x + dx, y: orig.control1.y + dy };
+                drawing.control2 = { x: orig.control2.x + dx, y: orig.control2.y + dy };
+              }
+              break;
+          }
         }
       }
     }
@@ -134,6 +233,7 @@ export class SelectTool extends BaseTool {
     this.isDragging = false;
     this.hasDragged = false;
     this.dragStartGrid = null;
+    this.dragBipoleEndpoint = null;
     this.dragOriginalPositions.clear();
   }
 
@@ -141,5 +241,23 @@ export class SelectTool extends BaseTool {
     if (e.key === 'Delete' || e.key === 'Backspace') {
       this.ctx.deleteElements(this.selection.getSelectedIds());
     }
+  }
+
+  private getHitBipoleEndpoint(gridPt: GridPoint, comp: BipoleInstance): 'start' | 'end' | null {
+    const startDist = Math.hypot(gridPt.x - comp.start.x, gridPt.y - comp.start.y);
+    const endDist = Math.hypot(gridPt.x - comp.end.x, gridPt.y - comp.end.y);
+    const radius = SelectTool.BIPOLE_ENDPOINT_HIT_RADIUS;
+    if (startDist > radius && endDist > radius) return null;
+    return startDist <= endDist ? 'start' : 'end';
+  }
+
+  private findSelectedBipoleEndpoint(gridPt: GridPoint): { id: string; endpoint: 'start' | 'end' } | null {
+    for (const id of this.selection.getSelectedIds()) {
+      const comp = this.ctx.getDocument().getComponent(id);
+      if (comp?.type !== 'bipole') continue;
+      const endpoint = this.getHitBipoleEndpoint(gridPt, comp);
+      if (endpoint) return { id, endpoint };
+    }
+    return null;
   }
 }

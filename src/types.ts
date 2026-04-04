@@ -135,6 +135,65 @@ export interface WireInstance {
 export type WireRoutingMode = 'auto' | '--' | '|-' | '-|';
 
 // ============================================================
+// DRAWINGS
+// ============================================================
+
+export type DrawingKind = 'line' | 'arrow' | 'text' | 'rectangle' | 'circle' | 'bezier';
+
+export interface DrawingProps {
+  options?: string;
+  text?: string;
+}
+
+export interface LineDrawingInstance {
+  id: string;
+  kind: 'line' | 'arrow';
+  start: GridPoint;
+  end: GridPoint;
+  props: DrawingProps;
+}
+
+export interface TextDrawingInstance {
+  id: string;
+  kind: 'text';
+  position: GridPoint;
+  props: DrawingProps;
+}
+
+export interface RectangleDrawingInstance {
+  id: string;
+  kind: 'rectangle';
+  start: GridPoint;
+  end: GridPoint;
+  props: DrawingProps;
+}
+
+export interface CircleDrawingInstance {
+  center: GridPoint;
+  id: string;
+  kind: 'circle';
+  props: DrawingProps;
+  radius: number;
+}
+
+export interface BezierDrawingInstance {
+  control1: GridPoint;
+  control2: GridPoint;
+  end: GridPoint;
+  id: string;
+  kind: 'bezier';
+  props: DrawingProps;
+  start: GridPoint;
+}
+
+export type DrawingInstance =
+  | LineDrawingInstance
+  | TextDrawingInstance
+  | RectangleDrawingInstance
+  | CircleDrawingInstance
+  | BezierDrawingInstance;
+
+// ============================================================
 // DOCUMENT
 // ============================================================
 
@@ -149,7 +208,20 @@ export interface DocumentMetadata {
 // TOOLS
 // ============================================================
 
-export type ToolType = 'move' | 'select' | 'place-bipole' | 'place-monopole' | 'place-node' | 'wire' | 'delete';
+export type ToolType =
+  | 'move'
+  | 'select'
+  | 'place-bipole'
+  | 'place-monopole'
+  | 'place-node'
+  | 'wire'
+  | 'delete'
+  | 'draw-line'
+  | 'draw-arrow'
+  | 'draw-text'
+  | 'draw-rectangle'
+  | 'draw-circle'
+  | 'draw-bezier';
 
 // ============================================================
 // EVENTS
@@ -162,6 +234,8 @@ export type AppEvent =
   | { type: 'component-props-changed'; id: string; props: Partial<ComponentProps> }
   | { type: 'wire-added'; wire: WireInstance }
   | { type: 'wire-removed'; id: string }
+  | { type: 'drawing-added'; drawing: DrawingInstance }
+  | { type: 'drawing-removed'; id: string }
   | { type: 'selection-changed'; selectedIds: string[]; source?: 'canvas' | 'code' | 'programmatic' }
   | { type: 'tool-changed'; tool: ToolType; defId?: string }
   | { type: 'style-changed'; style: 'european' | 'american' }
