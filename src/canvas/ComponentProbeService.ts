@@ -116,7 +116,7 @@ function buildMarkerColorDefs(markers: ProbeMarkerSpec[]): string[] {
     `\\definecolor{${marker.latexColorName}}{HTML}{${marker.color.slice(1).toUpperCase()}}`);
 }
 
-function extractRenderableMarkup(svg: SVGSVGElement, markerColors: Set<string>): string {
+function stripMarkerElements(svg: SVGSVGElement, markerColors: Set<string>): SVGSVGElement {
   const cleaned = svg.cloneNode(true) as SVGSVGElement;
   const elements = [...cleaned.querySelectorAll<SVGGraphicsElement>('path, circle, ellipse, rect, line, polygon, polyline, use')];
   for (const element of elements) {
@@ -131,7 +131,7 @@ function extractRenderableMarkup(svg: SVGSVGElement, markerColors: Set<string>):
       element.remove();
     }
   }
-  return cleaned.innerHTML;
+  return cleaned;
 }
 
 function measureProbeSvg(
@@ -206,7 +206,7 @@ function measureProbeSvg(
       bboxWidth: bbox.width * PT_TO_PX,
       bboxHeight: bbox.height * PT_TO_PX,
       pinOffsets,
-      svgMarkup: extractRenderableMarkup(liveSvg, markerColors),
+      svgMarkup: stripMarkerElements(liveSvg, markerColors).outerHTML,
       tx,
       ty,
     };

@@ -11,7 +11,7 @@ import { SELECTION_COLOR, GHOST_OPACITY, TIKZ_PT_PER_UNIT, GRID_SIZE } from '../
 import { scaleState } from './ScaleState';
 import { createGroup, createLine, createRect } from '../utils/svg';
 import { getBipoleBodyMetrics, getPlacedComponentMetrics } from './ComponentGeometry';
-import { componentProbeService, pickPrimaryPin, type ComponentRenderProbe } from './ComponentProbeService';
+import { componentProbeService, type ComponentRenderProbe } from './ComponentProbeService';
 
 const OVERLAY_STROKE_WIDTH = 0.5;
 const SELECTION_LINE_OPACITY = 1;
@@ -208,25 +208,22 @@ export class GhostRenderer {
     const cy = y * gs;
     const selectedComp = selectionId ? this.doc.getComponent(selectionId) : undefined;
     const probe = ghost
-      ? componentProbeService.getPlacedGhostProbe(def, rotation, () => this.setGhostElement(this.buildMonopoleGhost(def.id, { x, y }, rotation)))
+      ? null
       : selectionId && selectedComp
         ? componentProbeService.getSelectionProbe(selectionId, selectedComp, def, () => this.renderSelection())
         : null;
     if (probe) {
-      const primaryPin = ghost ? this.getPrimaryProbePin(probe) : null;
-      const anchorX = ghost && primaryPin ? cx - primaryPin.x : cx;
-      const anchorY = ghost && primaryPin ? cy - primaryPin.y : cy;
+      const anchorX = cx;
+      const anchorY = cy;
       const g = this.buildProbeSelectionGroup(anchorX, anchorY, probe, ghost);
-      if (ghost) this.appendProbeSvg(g, anchorX, anchorY, probe, GHOST_OPACITY);
       return g;
     }
     const { width, height, leftOffset, topOffset, scale } = getPlacedComponentMetrics(def, gs);
     const pins = (def.symbolPins && def.symbolPins.length > 0)
       ? def.symbolPins
       : [{ name: 'reference', x: 0, y: 0 }];
-    const primaryFallbackPin = ghost ? pins[0] : null;
-    const anchorX = ghost && primaryFallbackPin ? cx - primaryFallbackPin.x * scale : cx;
-    const anchorY = ghost && primaryFallbackPin ? cy - primaryFallbackPin.y * scale : cy;
+    const anchorX = cx;
+    const anchorY = cy;
     const left = anchorX + leftOffset;
     const top = anchorY + topOffset;
     const g = createGroup('sel-point');
@@ -236,20 +233,20 @@ export class GhostRenderer {
         opacity: 0.12,
       }));
     }
-    for (const pin of pins) {
-      const projected = this.projectPlacedPin(anchorX, anchorY, pin.x * scale, pin.y * scale, rotation);
-      g.appendChild(this.crossAt(
-        projected.x,
-        projected.y,
-        gs * OVERLAY_CROSS_SIZE,
-        ghost ? GHOST_LINE_OPACITY : SELECTION_LINE_OPACITY,
-      ));
+    if (ghost) {
+      g.appendChild(this.crossAt(anchorX, anchorY, gs * OVERLAY_CROSS_SIZE, GHOST_LINE_OPACITY));
+    } else {
+      for (const pin of pins) {
+        const projected = this.projectPlacedPin(anchorX, anchorY, pin.x * scale, pin.y * scale, rotation);
+        g.appendChild(this.crossAt(
+          projected.x,
+          projected.y,
+          gs * OVERLAY_CROSS_SIZE,
+          SELECTION_LINE_OPACITY,
+        ));
+      }
     }
     return g;
-  }
-
-  private getPrimaryProbePin(probe: ComponentRenderProbe): { name: string; x: number; y: number } | null {
-    return pickPrimaryPin(probe.pinOffsets);
   }
 
   private buildProbeSelectionGroup(
@@ -262,13 +259,17 @@ export class GhostRenderer {
     const gs = this.gs;
     const g = createGroup('sel-probe');
     g.setAttribute('transform', `translate(${anchorX}, ${anchorY}) rotate(${rotationDeg})`);
-    for (const pin of probe.pinOffsets) {
-      g.appendChild(this.crossAt(
-        pin.x,
-        pin.y,
-        gs * OVERLAY_CROSS_SIZE,
-        ghost ? GHOST_LINE_OPACITY : SELECTION_LINE_OPACITY,
-      ));
+    if (ghost) {
+      g.appendChild(this.crossAt(0, 0, gs * OVERLAY_CROSS_SIZE, GHOST_LINE_OPACITY));
+    } else {
+      for (const pin of probe.pinOffsets) {
+        g.appendChild(this.crossAt(
+          pin.x,
+          pin.y,
+          gs * OVERLAY_CROSS_SIZE,
+          SELECTION_LINE_OPACITY,
+        ));
+      }
     }
     return g;
   }
@@ -281,12 +282,29 @@ export class GhostRenderer {
     opacity: number,
     rotationDeg = 0,
   ): void {
-    const g = createGroup('probe-svg');
+    const parser = new DOMParser();
+    const doc = parser.parseFromString(probe.svgMarkup, 'image/svg+xml');
+    const nestedSvg = doc.querySelector('svg');
+    if (!nestedSvg) return;
+    const imported = document.importNode(nestedSvg, true) as SVGSVGElement;
     const ptToPx = GRID_SIZE / TIKZ_PT_PER_UNIT;
-    g.setAttribute('transform', `translate(${anchorX}, ${anchorY}) rotate(${rotationDeg}) translate(${-probe.tx * ptToPx}, ${-probe.ty * ptToPx}) scale(${ptToPx})`);
-    g.setAttribute('opacity', String(opacity));
-    g.innerHTML = probe.svgMarkup;
-    parent.appendChild(g);
+    const wrapper = createGroup('probe-svg');
+    wrapper.setAttribute('transform', `translate(${anchorX}, ${anchorY}) rotate(${rotationDeg})`);
+    imported.setAttribute('overflow', 'visible');
+    imported.style.overflow = 'visible';
+    imported.setAttribute('opacity', String(opacity));
+    const vb = imported.getAttribute('viewBox')?.split(/\s+/).map(Number);
+    if (vb && vb.length >= 4) {
+      imported.setAttribute('width', String(vb[2] * ptToPx));
+      imported.setAttribute('height', String(vb[3] * ptToPx));
+      imported.setAttribute('x', String(-probe.tx * ptToPx));
+      imported.setAttribute('y', String(-probe.ty * ptToPx));
+      imported.setAttribute('viewBox', vb.join(' '));
+    } else {
+      imported.setAttribute('transform', `translate(${-probe.tx * ptToPx}, ${-probe.ty * ptToPx}) scale(${ptToPx})`);
+    }
+    wrapper.appendChild(imported);
+    parent.appendChild(wrapper);
   }
 
   private projectPlacedPin(
