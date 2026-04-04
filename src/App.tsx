@@ -352,7 +352,7 @@ function ToolbarView({
             <ToggleButtonGroup
               exclusive
               onChange={(_event, value: ToolType | null) => {
-                if (value) onSelectTool(value);
+                onSelectTool(value ?? 'select');
               }}
               size="small"
               sx={{ alignSelf: 'center', '& .MuiToggleButton-root': toolbarToggleSx }}

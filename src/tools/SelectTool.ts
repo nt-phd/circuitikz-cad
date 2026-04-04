@@ -4,12 +4,14 @@ import type { SelectionState } from '../model/SelectionState';
 
 export class SelectTool extends BaseTool {
   private static readonly BIPOLE_ENDPOINT_HIT_RADIUS = 0.5;
+  private static readonly DRAWING_HANDLE_HIT_RADIUS = 0.5;
   private selection: SelectionState;
   private isDragging = false;
   private isMarqueeSelecting = false;
   private hasDragged = false;
   private dragStartGrid: GridPoint | null = null;
   private dragBipoleEndpoint: { id: string; endpoint: 'start' | 'end' } | null = null;
+  private dragDrawingHandle: { id: string; handle: 'start' | 'end' | 'position' | 'center' | 'control1' | 'control2' } | null = null;
   private marqueeCurrentGrid: GridPoint | null = null;
   private dragOriginalPositions = new Map<string, {
     start?: GridPoint;
@@ -40,8 +42,46 @@ export class SelectTool extends BaseTool {
         this.hasDragged = false;
         this.dragStartGrid = gridPt;
         this.dragBipoleEndpoint = endpointTarget;
+        this.dragDrawingHandle = null;
         this.dragOriginalPositions.clear();
         this.dragOriginalPositions.set(endpointTarget.id, { start: { ...hitComp.start }, end: { ...hitComp.end } });
+        this.ctx.emit({ type: 'selection-changed', selectedIds: this.selection.getSelectedIds(), source: 'canvas' });
+        return;
+      }
+    }
+
+    const drawingHandleTarget = this.findSelectedDrawingHandle(gridPt);
+    if (drawingHandleTarget) {
+      const drawing = this.ctx.getDocument().getDrawing(drawingHandleTarget.id);
+      if (drawing) {
+        this.isMarqueeSelecting = false;
+        this.isDragging = true;
+        this.hasDragged = false;
+        this.dragStartGrid = gridPt;
+        this.dragBipoleEndpoint = null;
+        this.dragDrawingHandle = drawingHandleTarget;
+        this.dragOriginalPositions.clear();
+        switch (drawing.kind) {
+          case 'line':
+          case 'arrow':
+          case 'rectangle':
+            this.dragOriginalPositions.set(drawing.id, { start: { ...drawing.start }, end: { ...drawing.end } });
+            break;
+          case 'text':
+            this.dragOriginalPositions.set(drawing.id, { position: { ...drawing.position } });
+            break;
+          case 'circle':
+            this.dragOriginalPositions.set(drawing.id, { center: { ...drawing.center } });
+            break;
+          case 'bezier':
+            this.dragOriginalPositions.set(drawing.id, {
+              start: { ...drawing.start },
+              end: { ...drawing.end },
+              control1: { ...drawing.control1 },
+              control2: { ...drawing.control2 },
+            });
+            break;
+        }
         this.ctx.emit({ type: 'selection-changed', selectedIds: this.selection.getSelectedIds(), source: 'canvas' });
         return;
       }
@@ -64,6 +104,7 @@ export class SelectTool extends BaseTool {
       this.hasDragged = false;
       this.dragStartGrid = gridPt;
       this.dragBipoleEndpoint = null;
+      this.dragDrawingHandle = null;
 
       this.dragOriginalPositions.clear();
       for (const id of this.selection.getSelectedIds()) {
@@ -163,6 +204,46 @@ export class SelectTool extends BaseTool {
       }
       return;
     }
+    if (this.dragDrawingHandle) {
+      const drawing = doc.getDrawing(this.dragDrawingHandle.id);
+      const orig = this.dragOriginalPositions.get(this.dragDrawingHandle.id);
+      if (drawing && orig) {
+        switch (drawing.kind) {
+          case 'line':
+          case 'arrow':
+          case 'rectangle':
+            if (this.dragDrawingHandle.handle === 'start' && orig.start) {
+              drawing.start = { x: orig.start.x + dx, y: orig.start.y + dy };
+            } else if (this.dragDrawingHandle.handle === 'end' && orig.end) {
+              drawing.end = { x: orig.end.x + dx, y: orig.end.y + dy };
+            }
+            break;
+          case 'text':
+            if (this.dragDrawingHandle.handle === 'position' && orig.position) {
+              drawing.position = { x: orig.position.x + dx, y: orig.position.y + dy };
+            }
+            break;
+          case 'circle':
+            if (this.dragDrawingHandle.handle === 'center' && orig.center) {
+              drawing.center = { x: orig.center.x + dx, y: orig.center.y + dy };
+            }
+            break;
+          case 'bezier':
+            if (this.dragDrawingHandle.handle === 'start' && orig.start) {
+              drawing.start = { x: orig.start.x + dx, y: orig.start.y + dy };
+            } else if (this.dragDrawingHandle.handle === 'end' && orig.end) {
+              drawing.end = { x: orig.end.x + dx, y: orig.end.y + dy };
+            } else if (this.dragDrawingHandle.handle === 'control1' && orig.control1) {
+              drawing.control1 = { x: orig.control1.x + dx, y: orig.control1.y + dy };
+            } else if (this.dragDrawingHandle.handle === 'control2' && orig.control2) {
+              drawing.control2 = { x: orig.control2.x + dx, y: orig.control2.y + dy };
+            }
+            break;
+        }
+        this.ctx.emit({ type: 'selection-changed', selectedIds: this.selection.getSelectedIds(), source: 'canvas' });
+      }
+      return;
+    }
     for (const [id, orig] of this.dragOriginalPositions) {
       const comp = doc.getComponent(id);
       if (comp && comp.type === 'bipole' && orig.start && orig.end) {
@@ -234,6 +315,7 @@ export class SelectTool extends BaseTool {
     this.hasDragged = false;
     this.dragStartGrid = null;
     this.dragBipoleEndpoint = null;
+    this.dragDrawingHandle = null;
     this.dragOriginalPositions.clear();
   }
 
@@ -257,6 +339,36 @@ export class SelectTool extends BaseTool {
       if (comp?.type !== 'bipole') continue;
       const endpoint = this.getHitBipoleEndpoint(gridPt, comp);
       if (endpoint) return { id, endpoint };
+    }
+    return null;
+  }
+
+  private findSelectedDrawingHandle(gridPt: GridPoint): { id: string; handle: 'start' | 'end' | 'position' | 'center' | 'control1' | 'control2' } | null {
+    const radius = SelectTool.DRAWING_HANDLE_HIT_RADIUS;
+    for (const id of this.selection.getSelectedIds()) {
+      const drawing = this.ctx.getDocument().getDrawing(id);
+      if (!drawing) continue;
+      const hit = (point: GridPoint) => Math.hypot(gridPt.x - point.x, gridPt.y - point.y) <= radius;
+      switch (drawing.kind) {
+        case 'line':
+        case 'arrow':
+        case 'rectangle':
+          if (hit(drawing.start)) return { id, handle: 'start' };
+          if (hit(drawing.end)) return { id, handle: 'end' };
+          break;
+        case 'text':
+          if (hit(drawing.position)) return { id, handle: 'position' };
+          break;
+        case 'circle':
+          if (hit(drawing.center)) return { id, handle: 'center' };
+          break;
+        case 'bezier':
+          if (hit(drawing.start)) return { id, handle: 'start' };
+          if (hit(drawing.control1)) return { id, handle: 'control1' };
+          if (hit(drawing.control2)) return { id, handle: 'control2' };
+          if (hit(drawing.end)) return { id, handle: 'end' };
+          break;
+      }
     }
     return null;
   }

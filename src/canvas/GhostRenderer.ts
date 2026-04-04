@@ -256,6 +256,20 @@ export class GhostRenderer {
         return g;
       }
       case 'bezier': {
+        g.appendChild(this.createOverlayLine(
+          drawing.start.x * gs,
+          drawing.start.y * gs,
+          drawing.control1.x * gs,
+          drawing.control1.y * gs,
+          { 'stroke-dasharray': '4 3', opacity: GHOST_LINE_OPACITY },
+        ));
+        g.appendChild(this.createOverlayLine(
+          drawing.control2.x * gs,
+          drawing.control2.y * gs,
+          drawing.end.x * gs,
+          drawing.end.y * gs,
+          { 'stroke-dasharray': '4 3', opacity: GHOST_LINE_OPACITY },
+        ));
         const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
         path.setAttribute('d', `M ${drawing.start.x * gs} ${drawing.start.y * gs} C ${drawing.control1.x * gs} ${drawing.control1.y * gs}, ${drawing.control2.x * gs} ${drawing.control2.y * gs}, ${drawing.end.x * gs} ${drawing.end.y * gs}`);
         path.setAttribute('fill', 'none');
@@ -264,6 +278,8 @@ export class GhostRenderer {
         path.setAttribute('vector-effect', 'non-scaling-stroke');
         g.appendChild(path);
         g.appendChild(this.crossAt(drawing.start.x * gs, drawing.start.y * gs, gs * OVERLAY_CROSS_SIZE));
+        g.appendChild(this.crossAt(drawing.control1.x * gs, drawing.control1.y * gs, gs * OVERLAY_CROSS_SIZE));
+        g.appendChild(this.crossAt(drawing.control2.x * gs, drawing.control2.y * gs, gs * OVERLAY_CROSS_SIZE));
         g.appendChild(this.crossAt(drawing.end.x * gs, drawing.end.y * gs, gs * OVERLAY_CROSS_SIZE));
         return g;
       }

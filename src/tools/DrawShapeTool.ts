@@ -102,6 +102,7 @@ export class DrawShapeTool extends BaseTool {
           'stroke-width': OVERLAY_STROKE_WIDTH,
           'vector-effect': 'non-scaling-stroke',
           opacity: GHOST_OPACITY,
+          'stroke-dasharray': '4 3',
         }));
         g.appendChild(crossAt(a));
         g.appendChild(crossAt(gridPt));
@@ -128,6 +129,7 @@ export class DrawShapeTool extends BaseTool {
             'stroke-width': OVERLAY_STROKE_WIDTH,
             'vector-effect': 'non-scaling-stroke',
             opacity: GHOST_OPACITY,
+            'stroke-dasharray': '4 3',
           },
         ));
         g.appendChild(crossAt(a));
@@ -142,6 +144,7 @@ export class DrawShapeTool extends BaseTool {
           'stroke-width': OVERLAY_STROKE_WIDTH,
           'vector-effect': 'non-scaling-stroke',
           opacity: GHOST_OPACITY,
+          'stroke-dasharray': '4 3',
         }));
         g.appendChild(crossAt(a));
         break;
@@ -168,6 +171,7 @@ export class DrawShapeTool extends BaseTool {
                 'stroke-width': OVERLAY_STROKE_WIDTH,
                 'vector-effect': 'non-scaling-stroke',
                 opacity: GHOST_OPACITY,
+                'stroke-dasharray': '4 3',
               },
             ));
           }
