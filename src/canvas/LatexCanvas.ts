@@ -26,7 +26,7 @@ import { HitTester } from './HitTester';
 import {
   GRID_SIZE, TIKZ_PT_PER_UNIT, RENDER_SERVER_URL,
   MAJOR_GRID_EVERY, GRID_COLOR_MINOR, GRID_COLOR_MAJOR,
-  ZOOM_STEP, SNAP_GRID,
+  ZOOM_STEP,
 } from '../constants';
 import { scaleState } from './ScaleState';
 import { createSvgElement } from '../utils/svg';
@@ -34,6 +34,7 @@ import { createSvgElement } from '../utils/svg';
 // Base pt-to-px at zoom=1, scale=1: 20px per TikZ unit, 1 TikZ unit = TIKZ_PT_PER_UNIT pt
 // The actual conversion must include tikzScale: PT_TO_PX * tikzScale
 const BASE_PT_TO_PX = GRID_SIZE / TIKZ_PT_PER_UNIT;
+const ZOOM_LEVELS = [1, 2, 3, 4, 5];
 
 export class LatexCanvas {
   readonly view: ViewTransform;
@@ -50,6 +51,8 @@ export class LatexCanvas {
   private renderInFlight = false;
   private renderPending = false;
   private errorBanner: HTMLDivElement | null = null;
+  private hasPerformedInitialFit = false;
+  private renderedContentBounds: { left: number; top: number; width: number; height: number } | null = null;
 
   // Grid SVG elements
   private patternMinor!: SVGPatternElement;
@@ -64,6 +67,7 @@ export class LatexCanvas {
   // Pan/zoom
   private spaceHeld = false;
   private isPanning = false;
+  private primaryPanEnabled = false;
   private lastPanX = 0;
   private lastPanY = 0;
 
@@ -126,12 +130,7 @@ export class LatexCanvas {
 
     this.attachPanZoom();
 
-    // Center origin in viewport
-    requestAnimationFrame(() => {
-      const rect = container.getBoundingClientRect();
-      this.view.pan(rect.width / 3, rect.height / 2);
-      this.refresh();
-    });
+    this.refresh();
   }
 
   // ====== PUBLIC API ======
@@ -155,7 +154,7 @@ export class LatexCanvas {
   }
 
   updateGridScale(): void {
-    const gs = scaleState.effectiveGridSize * SNAP_GRID;
+    const gs = scaleState.effectiveGridSize * scaleState.gridPitch;
     const majorSize = gs * MAJOR_GRID_EVERY;
     this.patternMinor.setAttribute('x', String(-gs / 2));
     this.patternMinor.setAttribute('y', String(-gs / 2));
@@ -174,6 +173,44 @@ export class LatexCanvas {
     this.updateGridDotScale();
   }
 
+  setGridVisible(visible: boolean): void {
+    this.gridSvg.style.display = visible ? '' : 'none';
+  }
+
+  zoomIn(): void {
+    const rect = this.container.getBoundingClientRect();
+    const current = Math.round(this.view.zoom);
+    const next = ZOOM_LEVELS.find((level) => level > current) ?? ZOOM_LEVELS[ZOOM_LEVELS.length - 1];
+    this.view.setZoomAt({ x: rect.width / 2, y: rect.height / 2 }, next);
+    this.refresh();
+  }
+
+  zoomOut(): void {
+    const rect = this.container.getBoundingClientRect();
+    const current = Math.round(this.view.zoom);
+    const reversed = [...ZOOM_LEVELS].reverse();
+    const next = reversed.find((level) => level < current) ?? ZOOM_LEVELS[0];
+    this.view.setZoomAt({ x: rect.width / 2, y: rect.height / 2 }, next);
+    this.refresh();
+  }
+
+  fitToScreen(): void {
+    const content = this.renderedContentBounds;
+    const rect = this.container.getBoundingClientRect();
+    if (!content || content.width <= 0 || content.height <= 0 || rect.width <= 0 || rect.height <= 0) return;
+    const padding = 24;
+    const availableWidth = Math.max(1, rect.width - padding * 2);
+    const availableHeight = Math.max(1, rect.height - padding * 2);
+    const fitZoom = Math.min(availableWidth / content.width, availableHeight / content.height);
+    const clampedZoom = Math.max(0.1, Math.min(5, fitZoom));
+    this.view.reset(clampedZoom);
+    this.view.pan(
+      (rect.width - content.width * clampedZoom) / 2 - content.left * clampedZoom,
+      (rect.height - content.height * clampedZoom) / 2 - content.top * clampedZoom,
+    );
+    this.refresh();
+  }
+
   /** Trigger a pdflatex render. Queues if one is already in flight. */
   scheduleRender(): void {
     if (this.renderInFlight) {
@@ -185,6 +222,13 @@ export class LatexCanvas {
 
   get isCurrentlyPanning(): boolean {
     return this.isPanning || this.spaceHeld;
+  }
+
+  setPrimaryPanEnabled(enabled: boolean): void {
+    this.primaryPanEnabled = enabled;
+    if (!enabled && !this.isPanning && !this.spaceHeld) {
+      this.overlaySvg.style.cursor = '';
+    }
   }
 
   getRenderedSvg(): string | null {
@@ -240,8 +284,16 @@ export class LatexCanvas {
     // Parse viewBox dimensions (in pt) and convert to px
     const vb = svgEl.getAttribute('viewBox')?.split(/\s+/).map(Number);
     if (vb && vb.length >= 4) {
-      svgEl.style.width  = (vb[2] * ptToPx) + 'px';
-      svgEl.style.height = (vb[3] * ptToPx) + 'px';
+      const widthPx = vb[2] * ptToPx;
+      const heightPx = vb[3] * ptToPx;
+      svgEl.style.width  = widthPx + 'px';
+      svgEl.style.height = heightPx + 'px';
+      this.renderedContentBounds = {
+        left: -tx * ptToPx,
+        top: -ty * ptToPx,
+        width: widthPx,
+        height: heightPx,
+      };
     }
     svgEl.removeAttribute('width');
     svgEl.removeAttribute('height');
@@ -250,6 +302,11 @@ export class LatexCanvas {
     // Align TikZ(0,0) with world origin
     this.latexDiv.style.left = (-tx * ptToPx) + 'px';
     this.latexDiv.style.top  = (-ty * ptToPx) + 'px';
+
+    if (!this.hasPerformedInitialFit) {
+      this.hasPerformedInitialFit = true;
+      requestAnimationFrame(() => this.fitToScreen());
+    }
   }
 
   private setGhostLatexPreview(preview: GhostLatexPreview | null): void {
@@ -345,7 +402,7 @@ export class LatexCanvas {
 
   private buildGrid(): void {
     const defs = createSvgElement('defs') as SVGDefsElement;
-    const gs = scaleState.effectiveGridSize * SNAP_GRID;
+    const gs = scaleState.effectiveGridSize * scaleState.gridPitch;
     const majorSize = gs * MAJOR_GRID_EVERY;
 
     this.patternMinor = createSvgElement('pattern', {
@@ -432,7 +489,7 @@ export class LatexCanvas {
     }, { passive: false });
 
     el.addEventListener('mousedown', (e: MouseEvent) => {
-      if (e.button === 1 || (e.button === 0 && this.spaceHeld)) {
+      if (e.button === 1 || (e.button === 0 && (this.spaceHeld || this.primaryPanEnabled))) {
         e.preventDefault();
         this.isPanning = true;
         this.lastPanX = e.clientX;
@@ -452,7 +509,7 @@ export class LatexCanvas {
     window.addEventListener('mouseup', (e: MouseEvent) => {
       if (this.isPanning && (e.button === 1 || e.button === 0)) {
         this.isPanning = false;
-        el.style.cursor = this.spaceHeld ? 'grab' : '';
+        el.style.cursor = this.spaceHeld || this.primaryPanEnabled ? 'grab' : '';
       }
     });
 

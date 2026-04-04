@@ -65,6 +65,8 @@ function segmentIntersectsRect(
 }
 
 export class HitTester {
+  connectionSnapEnabled = true;
+
   constructor(
     private doc: CircuitDocument,
     private registry: ComponentRegistry,

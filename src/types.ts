@@ -132,6 +132,8 @@ export interface WireInstance {
   junctions: Map<number, TerminalMark>;
 }
 
+export type WireRoutingMode = 'auto' | '--' | '|-' | '-|';
+
 // ============================================================
 // DOCUMENT
 // ============================================================
@@ -147,7 +149,7 @@ export interface DocumentMetadata {
 // TOOLS
 // ============================================================
 
-export type ToolType = 'select' | 'place-bipole' | 'place-monopole' | 'place-node' | 'wire' | 'delete';
+export type ToolType = 'move' | 'select' | 'place-bipole' | 'place-monopole' | 'place-node' | 'wire' | 'delete';
 
 // ============================================================
 // EVENTS

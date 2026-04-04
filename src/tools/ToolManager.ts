@@ -1,6 +1,7 @@
-import type { ToolType, AppEvent } from '../types';
+import type { ToolType, AppEvent, WireRoutingMode } from '../types';
 import { BaseTool, type ToolContext } from './BaseTool';
 import { SelectTool } from './SelectTool';
+import { MoveTool } from './MoveTool';
 import { PlaceBipoleTool } from './PlaceBipoleTool';
 import { PlaceMonopoleTool } from './PlaceMonopoleTool';
 import { WireTool } from './WireTool';
@@ -12,6 +13,7 @@ export class ToolManager {
   private currentTool: BaseTool;
   private _currentType: ToolType = 'select';
   private _currentDefId?: string;
+  private _wireRoutingMode: WireRoutingMode = 'auto';
 
   constructor(
     private ctx: ToolContext,
@@ -25,6 +27,7 @@ export class ToolManager {
 
   get currentType(): ToolType { return this._currentType; }
   get currentDefId(): string | undefined { return this._currentDefId; }
+  get wireRoutingMode(): WireRoutingMode { return this._wireRoutingMode; }
 
   setTool(type: ToolType, defId?: string): void {
     this.currentTool.deactivate();
@@ -32,7 +35,13 @@ export class ToolManager {
     this._currentDefId = defId;
 
     const overlay = this.canvas.overlaySvg;
+    this.canvas.setPrimaryPanEnabled(false);
     switch (type) {
+      case 'move':
+        this.currentTool = new MoveTool(this.ctx);
+        this.canvas.setPrimaryPanEnabled(true);
+        overlay.style.cursor = 'grab';
+        break;
       case 'select':
         this.currentTool = new SelectTool(this.ctx, this.selection);
         overlay.style.cursor = 'default';
@@ -47,16 +56,24 @@ export class ToolManager {
         break;
       case 'wire':
         this.currentTool = new WireTool(this.ctx);
+        (this.currentTool as WireTool).setRoutingMode(this._wireRoutingMode);
         overlay.style.cursor = 'crosshair';
         break;
       case 'delete':
         this.currentTool = new DeleteTool(this.ctx);
-        overlay.style.cursor = 'not-allowed';
+        overlay.style.cursor = 'default';
         break;
     }
 
     this.currentTool.activate();
     this.emitEvent({ type: 'tool-changed', tool: type, defId });
+  }
+
+  setWireRoutingMode(mode: WireRoutingMode): void {
+    this._wireRoutingMode = mode;
+    if (this.currentTool instanceof WireTool) {
+      this.currentTool.setRoutingMode(mode);
+    }
   }
 
   private attachListeners(): void {

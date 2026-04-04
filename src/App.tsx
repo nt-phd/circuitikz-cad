@@ -9,9 +9,6 @@ import type {
   WheelEvent as ReactWheelEvent,
 } from 'react';
 import {
-  Accordion,
-  AccordionDetails,
-  AccordionSummary,
   AppBar,
   Box,
   Button,
@@ -27,18 +24,34 @@ import {
   TextField,
   ThemeProvider,
   Toolbar,
+  ToggleButton,
+  ToggleButtonGroup,
+  Tooltip,
   Typography,
   createTheme,
 } from '@mui/material';
+import SearchRoundedIcon from '@mui/icons-material/SearchRounded';
 import ContentCopyRoundedIcon from '@mui/icons-material/ContentCopyRounded';
 import DownloadRoundedIcon from '@mui/icons-material/DownloadRounded';
 import ExpandMoreRoundedIcon from '@mui/icons-material/ExpandMoreRounded';
+import RouteRoundedIcon from '@mui/icons-material/RouteRounded';
+import DeleteOutlineRoundedIcon from '@mui/icons-material/DeleteOutlineRounded';
+import Grid4x4RoundedIcon from '@mui/icons-material/Grid4x4Rounded';
+import UndoRoundedIcon from '@mui/icons-material/UndoRounded';
+import LightModeRoundedIcon from '@mui/icons-material/LightModeRounded';
+import DarkModeRoundedIcon from '@mui/icons-material/DarkModeRounded';
+import AccountTreeRoundedIcon from '@mui/icons-material/AccountTreeRounded';
+import OpenWithRoundedIcon from '@mui/icons-material/OpenWithRounded';
+import DeleteSweepRoundedIcon from '@mui/icons-material/DeleteSweepRounded';
+import NavigationRoundedIcon from '@mui/icons-material/NavigationRounded';
+import ZoomInRoundedIcon from '@mui/icons-material/ZoomInRounded';
+import ZoomOutRoundedIcon from '@mui/icons-material/ZoomOutRounded';
+import FitScreenRoundedIcon from '@mui/icons-material/FitScreenRounded';
 import type { ImperativeAppHandle } from './initImperativeApp';
 import { initImperativeApp } from './initImperativeApp';
 import { lineIndexFromId } from './codegen/CircuiTikZParser';
 import type { ComponentDef, Rotation, TerminalMark, ToolType } from './types';
-import { SNAP_GRID } from './constants';
-
+import type { WireRoutingMode } from './types';
 const GROUP_ORDER = [
   'Resistive bipoles',
   'Capacitive and dynamic bipoles',
@@ -58,21 +71,17 @@ const GROUP_ORDER = [
   'Tubes',
 ] as const;
 
-const TOOL_LABELS: Array<{ id: ToolType; label: string }> = [
-  { id: 'select', label: 'Select' },
-  { id: 'wire', label: 'Wire' },
-  { id: 'delete', label: 'Delete' },
+const TOOL_LABELS: Array<{ activeWhen: ToolType; icon: ReactNode; id: ToolType; label: string }> = [
+  { id: 'move', activeWhen: 'move', label: 'Move', icon: <OpenWithRoundedIcon fontSize="small" /> },
+  { id: 'select', activeWhen: 'select', label: 'Select', icon: <NavigationRoundedIcon fontSize="small" /> },
+  { id: 'wire', activeWhen: 'wire', label: 'Wire', icon: <RouteRoundedIcon fontSize="small" /> },
+  { id: 'delete', activeWhen: 'delete', label: 'Delete', icon: <DeleteOutlineRoundedIcon fontSize="small" /> },
 ];
 
 const DEFAULT_SIDEBAR_WIDTH = 360;
 const MIN_SIDEBAR_WIDTH = 280;
 const MAX_SIDEBAR_WIDTH = 640;
-
-const darkTheme = createTheme({
-  palette: {
-    mode: 'dark',
-  },
-});
+const RECENT_LIBRARY_KEY = 'circuitikz-cad.library.recent';
 
 function toolForDef(def: ComponentDef): ToolType {
   return def.placementType === 'bipole'
@@ -82,10 +91,49 @@ function toolForDef(def: ComponentDef): ToolType {
       : 'place-node';
 }
 
-function formatGridCoord(value: number): string {
-  const snapped = Math.round(value / SNAP_GRID) * SNAP_GRID;
-  const decimals = Number.isInteger(SNAP_GRID) ? 0 : (String(SNAP_GRID).split('.')[1]?.length ?? 0);
+function formatGridCoord(value: number, pitch: number): string {
+  const snapped = Math.round(value / pitch) * pitch;
+  const decimals = Number.isInteger(pitch) ? 0 : (String(pitch).split('.')[1]?.length ?? 0);
   return snapped.toFixed(decimals).replace(/\.0+$/, '').replace(/(\.\d*?)0+$/, '$1');
+}
+
+function namespaceInlineSvg(markup: string, prefix: string): string {
+  try {
+    const parser = new DOMParser();
+    const doc = parser.parseFromString(markup, 'image/svg+xml');
+    const svg = doc.querySelector('svg');
+    if (!svg) return markup;
+    const idMap = new Map<string, string>();
+    for (const element of svg.querySelectorAll('[id]')) {
+      const current = element.getAttribute('id');
+      if (!current) continue;
+      const next = `${prefix}-${current}`;
+      idMap.set(current, next);
+      element.setAttribute('id', next);
+    }
+    const attrs = ['href', 'xlink:href', 'clip-path', 'fill', 'filter', 'marker-start', 'marker-mid', 'marker-end', 'mask', 'stroke'];
+    for (const element of svg.querySelectorAll('*')) {
+      for (const attr of attrs) {
+        const value = element.getAttribute(attr);
+        if (!value) continue;
+        let next = value;
+        for (const [from, to] of idMap) {
+          next = next.replaceAll(`url(#${from})`, `url(#${to})`).replaceAll(`#${from}`, `#${to}`);
+        }
+        if (next !== value) element.setAttribute(attr, next);
+      }
+      const style = element.getAttribute('style');
+      if (!style) continue;
+      let nextStyle = style;
+      for (const [from, to] of idMap) {
+        nextStyle = nextStyle.replaceAll(`url(#${from})`, `url(#${to})`).replaceAll(`#${from}`, `#${to}`);
+      }
+      if (nextStyle !== style) element.setAttribute('style', nextStyle);
+    }
+    return svg.outerHTML;
+  } catch {
+    return markup;
+  }
 }
 
 function PanelSection({
@@ -104,12 +152,7 @@ function PanelSection({
   title: string;
 }) {
   return (
-    <Accordion
-      disableGutters
-      elevation={0}
-      expanded={expanded}
-      onChange={onChange}
-      square={false}
+    <Box
       sx={{
         backgroundColor: 'background.paper',
         border: 1,
@@ -118,89 +161,122 @@ function PanelSection({
         display: 'flex',
         flexDirection: 'column',
         flex: expanded ? (grow ? '1 1 0' : '0 0 auto') : '0 0 auto',
-        minHeight: expanded && grow ? 180 : 'auto',
+        minHeight: expanded && grow ? 120 : 'auto',
         minWidth: 0,
         overflow: 'hidden',
-        '& .MuiCollapse-root': {
-          display: 'flex',
-          flex: 1,
-          minHeight: 0,
-        },
-        '& .MuiCollapse-wrapper': {
-          display: 'flex',
-          flex: 1,
-          minHeight: 0,
-        },
-        '& .MuiCollapse-wrapperInner': {
-          display: 'flex',
-          flex: 1,
-          minHeight: 0,
-          width: '100%',
-        },
-        '& .MuiAccordion-region': {
-          display: 'flex',
-          flex: 1,
-          minHeight: 0,
-        },
-        '&::before': { display: 'none' },
       }}
     >
-      <AccordionSummary
-        expandIcon={<ExpandMoreRoundedIcon fontSize="small" />}
+      <Button
+        fullWidth
+        onClick={onChange}
         sx={{
+          borderBottom: expanded ? 1 : 0,
+          borderColor: 'divider',
+          borderRadius: 0,
+          color: 'text.primary',
+          justifyContent: 'space-between',
           minHeight: 44,
           px: 1.5,
-          '& .MuiAccordionSummary-content': {
-            alignItems: 'center',
-            gap: 1,
-            my: 0.5,
-          },
+          py: 0.5,
+          textTransform: 'none',
         }}
+        variant="text"
       >
-        <Typography
+        <Stack alignItems="center" direction="row" spacing={1} sx={{ minWidth: 0 }}>
+          <Typography
+            sx={{
+              color: 'text.secondary',
+              fontSize: 12,
+              fontWeight: 600,
+              letterSpacing: '0.08em',
+              textTransform: 'uppercase',
+            }}
+            variant="subtitle2"
+          >
+            {title}
+          </Typography>
+          {actions ? (
+            <Box
+              onClick={(event) => event.stopPropagation()}
+              onFocus={(event) => event.stopPropagation()}
+              onMouseDown={(event) => event.stopPropagation()}
+            >
+              <Stack direction="row" spacing={0.75}>
+                {actions}
+              </Stack>
+            </Box>
+          ) : null}
+        </Stack>
+        <ExpandMoreRoundedIcon
+          fontSize="small"
           sx={{
             color: 'text.secondary',
-            fontSize: 12,
-            fontWeight: 600,
-            letterSpacing: '0.08em',
-            textTransform: 'uppercase',
+            flexShrink: 0,
+            transform: expanded ? 'rotate(180deg)' : 'rotate(0deg)',
+            transition: 'transform 160ms ease',
           }}
-          variant="subtitle2"
-        >
-          {title}
-        </Typography>
-        {actions ? (
-          <Box
-            onClick={(event) => event.stopPropagation()}
-            onFocus={(event) => event.stopPropagation()}
-            onMouseDown={(event) => event.stopPropagation()}
-          >
-            <Stack
-              direction="row"
-              spacing={0.75}
-              sx={{ ml: 'auto' }}
-            >
-              {actions}
-            </Stack>
-          </Box>
-        ) : null}
-      </AccordionSummary>
-      <AccordionDetails sx={{ display: 'flex', flex: 1, minHeight: 0, minWidth: 0, overflow: 'hidden', p: 0 }}>
-        {children}
-      </AccordionDetails>
-    </Accordion>
+        />
+      </Button>
+      {expanded ? (
+        <Box sx={{ display: 'flex', flex: 1, minHeight: 0, minWidth: 0, overflow: 'hidden' }}>
+          {children}
+        </Box>
+      ) : null}
+    </Box>
   );
 }
 
 function ToolbarView({
   currentTool,
+  gridVisible,
+  onToggleGridVisible,
+  onTogglePinSnap,
+  onToggleThemeMode,
+  onWireRoutingModeChange,
+  pinSnapEnabled,
   onClear,
+  onFitToScreen,
   onSelectTool,
+  onUndo,
+  onZoomIn,
+  onZoomOut,
+  themeMode,
+  wireRoutingMode,
 }: {
   currentTool: ToolType;
+  gridVisible: boolean;
+  onToggleGridVisible: (checked: boolean) => void;
+  onTogglePinSnap: (checked: boolean) => void;
+  onToggleThemeMode: () => void;
+  onWireRoutingModeChange: (mode: WireRoutingMode) => void;
+  pinSnapEnabled: boolean;
   onClear: () => void;
+  onFitToScreen: () => void;
   onSelectTool: (tool: ToolType) => void;
+  onUndo: () => void;
+  onZoomIn: () => void;
+  onZoomOut: () => void;
+  themeMode: 'light' | 'dark';
+  wireRoutingMode: WireRoutingMode;
 }) {
+  const toolbarToggleSx = {
+    alignSelf: 'center',
+    height: 30,
+    minHeight: 30,
+    minWidth: 34,
+    px: 0.75,
+    py: 0.35,
+    textTransform: 'none',
+  } as const;
+  const toolbarButtonSx = {
+    alignSelf: 'center',
+    height: 30,
+    minHeight: 30,
+    minWidth: 34,
+    px: 0.75,
+    py: 0.35,
+  } as const;
+
   return (
     <AppBar
       color="default"
@@ -209,22 +285,157 @@ function ToolbarView({
       sx={{ borderBottom: 1, borderColor: 'divider', gridArea: 'toolbar' }}
     >
       <Toolbar sx={{ gap: 1, minHeight: '40px !important', px: 1.5 }}>
-        <ButtonGroup size="small" variant="outlined">
-          {TOOL_LABELS.map(({ id, label }) => (
-            <Button
-              color={currentTool === id ? 'primary' : 'inherit'}
-              key={id}
-              onClick={() => onSelectTool(id)}
-              variant={currentTool === id ? 'contained' : 'outlined'}
-            >
-              {label}
-            </Button>
-          ))}
-        </ButtonGroup>
+        <Stack alignItems="center" direction="row" spacing={1} sx={{ mr: 1.5 }}>
+          <Box
+            alt="CircuitikZ CAD"
+            component="img"
+            src="/favicon.svg"
+            sx={{ display: 'block', height: 18, width: 18 }}
+          />
+          <Typography sx={{ fontSize: 13, fontWeight: 700, letterSpacing: '0.02em' }} variant="body2">
+            CircuitikZ CAD
+          </Typography>
+        </Stack>
         <Divider flexItem orientation="vertical" />
-        <Button onClick={onClear} size="small" variant="outlined">
-          Clear
-        </Button>
+        <Typography color="text.secondary" sx={{ fontSize: 12, fontWeight: 600, letterSpacing: '0.04em' }} variant="caption">
+          Mode
+        </Typography>
+        <ToggleButtonGroup
+          exclusive
+          onChange={(_event, value: ToolType | null) => {
+            if (value) onSelectTool(value);
+          }}
+          size="small"
+          sx={{ alignSelf: 'center', '& .MuiToggleButton-root': toolbarToggleSx }}
+          value={currentTool}
+        >
+          {TOOL_LABELS.map(({ activeWhen, icon, id, label }) => (
+            <Tooltip
+              key={`${id}-${label}`}
+              title={
+                label === 'Move'
+                  ? 'Move canvas'
+                  : label === 'Select'
+                    ? 'Select and edit'
+                    : label === 'Wire'
+                      ? 'Draw wire'
+                      : 'Delete by click'
+              }
+            >
+              <ToggleButton aria-label={label} value={activeWhen}>
+                {icon}
+              </ToggleButton>
+            </Tooltip>
+          ))}
+        </ToggleButtonGroup>
+        <Divider flexItem orientation="vertical" />
+        {currentTool === 'wire' ? (
+          <>
+            <Typography color="text.secondary" sx={{ fontSize: 12, fontWeight: 600, letterSpacing: '0.04em' }} variant="caption">
+              Routing
+            </Typography>
+            <ToggleButtonGroup
+              exclusive
+              onChange={(_event, value: WireRoutingMode | null) => {
+                if (value) onWireRoutingModeChange(value);
+              }}
+              size="small"
+              sx={{ alignSelf: 'center', '& .MuiToggleButton-root': toolbarToggleSx }}
+              value={wireRoutingMode}
+            >
+              {(['auto', '--', '|-', '-|'] as const).map((mode) => (
+                <Tooltip
+                  key={mode}
+                  title={
+                    mode === 'auto'
+                      ? 'Wire routing: Auto'
+                      : mode === '--'
+                        ? 'Wire routing: Straight'
+                        : mode === '|-'
+                          ? 'Wire routing: Vertical then horizontal'
+                          : 'Wire routing: Horizontal then vertical'
+                  }
+                >
+                  <ToggleButton aria-label={mode === 'auto' ? 'Routing auto' : `Routing ${mode}`} value={mode}>
+                    <Typography sx={{ fontFamily: '"Roboto Mono", monospace', fontSize: 12 }} variant="caption">
+                      {mode === 'auto' ? 'A' : mode}
+                    </Typography>
+                  </ToggleButton>
+                </Tooltip>
+              ))}
+            </ToggleButtonGroup>
+            <Tooltip title="Snap wire to pins">
+              <ToggleButton
+                aria-label="Pin snap"
+                onClick={() => onTogglePinSnap(!pinSnapEnabled)}
+                selected={pinSnapEnabled}
+                size="small"
+                sx={toolbarToggleSx}
+                value="pin-snap"
+              >
+                <AccountTreeRoundedIcon fontSize="small" />
+              </ToggleButton>
+            </Tooltip>
+            <Divider flexItem orientation="vertical" />
+          </>
+        ) : null}
+        {currentTool === 'move' ? (
+          <>
+            <Typography color="text.secondary" sx={{ fontSize: 12, fontWeight: 600, letterSpacing: '0.04em' }} variant="caption">
+              View
+            </Typography>
+            <Tooltip title="Zoom out">
+              <Button aria-label="Zoom out" onClick={onZoomOut} size="small" sx={toolbarButtonSx} variant="outlined">
+                <ZoomOutRoundedIcon fontSize="small" />
+              </Button>
+            </Tooltip>
+            <Tooltip title="Zoom in">
+              <Button aria-label="Zoom in" onClick={onZoomIn} size="small" sx={toolbarButtonSx} variant="outlined">
+                <ZoomInRoundedIcon fontSize="small" />
+              </Button>
+            </Tooltip>
+            <Tooltip title="Fit to screen">
+              <Button aria-label="Fit to screen" onClick={onFitToScreen} size="small" sx={toolbarButtonSx} variant="outlined">
+                <FitScreenRoundedIcon fontSize="small" />
+              </Button>
+            </Tooltip>
+            <Divider flexItem orientation="vertical" />
+          </>
+        ) : null}
+        {currentTool === 'delete' ? (
+          <>
+            <Typography color="text.secondary" sx={{ fontSize: 12, fontWeight: 600, letterSpacing: '0.04em' }} variant="caption">
+              Delete
+            </Typography>
+            <Button color="error" onClick={onClear} size="small" startIcon={<DeleteSweepRoundedIcon fontSize="small" />} variant="outlined">
+              Delete all
+            </Button>
+            <Divider flexItem orientation="vertical" />
+          </>
+        ) : null}
+        <Box sx={{ ml: 'auto' }} />
+        <Tooltip title="Undo last change">
+          <Button aria-label="Undo" onClick={onUndo} size="small" sx={toolbarButtonSx} variant="outlined">
+            <UndoRoundedIcon fontSize="small" />
+          </Button>
+        </Tooltip>
+        <Tooltip title="Show grid">
+          <ToggleButton
+            aria-label="Show grid"
+            onClick={() => onToggleGridVisible(!gridVisible)}
+            selected={gridVisible}
+            size="small"
+            sx={toolbarToggleSx}
+            value="grid"
+          >
+            <Grid4x4RoundedIcon fontSize="small" />
+          </ToggleButton>
+        </Tooltip>
+        <Tooltip title={themeMode === 'dark' ? 'Toggle dark mode' : 'Toggle light mode'}>
+          <ToggleButton aria-label="Theme mode" onClick={onToggleThemeMode} selected={themeMode === 'dark'} size="small" sx={toolbarToggleSx} value="theme-mode">
+            {themeMode === 'dark' ? <DarkModeRoundedIcon fontSize="small" /> : <LightModeRoundedIcon fontSize="small" />}
+          </ToggleButton>
+        </Tooltip>
       </Toolbar>
     </AppBar>
   );
@@ -240,7 +451,18 @@ function LibraryView({
   onSelectTool: (tool: ToolType, defId?: string) => void;
 }) {
   const [query, setQuery] = useState('');
+  const [expandedGroups, setExpandedGroups] = useState<string[]>(['Recent']);
+  const [recentIds, setRecentIds] = useState<string[]>(() => {
+    if (typeof window === 'undefined') return [];
+    try {
+      const raw = window.localStorage.getItem(RECENT_LIBRARY_KEY);
+      return raw ? JSON.parse(raw) as string[] : [];
+    } catch {
+      return [];
+    }
+  });
   const defs = useMemo(() => handle?.registry.getAll() ?? [], [handle]);
+  const queryLower = query.trim().toLowerCase();
 
   useEffect(() => {
     if (!handle) return;
@@ -268,13 +490,19 @@ function LibraryView({
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [defs, handle, onSelectTool]);
 
-  const filtered = query
+  const filtered = queryLower
     ? defs.filter((def) =>
-        def.displayName.toLowerCase().includes(query.toLowerCase()) ||
-        def.tikzName.toLowerCase().includes(query.toLowerCase()) ||
-        (def.group ?? '').toLowerCase().includes(query.toLowerCase()),
+        def.displayName.toLowerCase().includes(queryLower) ||
+        def.tikzName.toLowerCase().includes(queryLower) ||
+        (def.group ?? '').toLowerCase().includes(queryLower),
       )
     : defs;
+
+  const defsById = useMemo(() => new Map(defs.map((def) => [def.id, def])), [defs]);
+  const recentDefs = useMemo(
+    () => recentIds.map((id) => defsById.get(id)).filter(Boolean) as ComponentDef[],
+    [defsById, recentIds],
+  );
 
   const groups = new Map<string, ComponentDef[]>();
   for (const def of filtered) {
@@ -298,10 +526,46 @@ function LibraryView({
     event.preventDefault();
   };
 
+  const rememberRecent = (defId: string) => {
+    setRecentIds((prev) => {
+      const next = [defId, ...prev.filter((id) => id !== defId)].slice(0, 8);
+      try {
+        window.localStorage.setItem(RECENT_LIBRARY_KEY, JSON.stringify(next));
+      } catch {
+        // Ignore storage errors.
+      }
+      return next;
+    });
+  };
+
+  const renderLibraryButton = (def: ComponentDef) => (
+    <LibraryItemButton
+      currentDefId={currentDefId}
+      def={def}
+      handle={handle}
+      key={def.id}
+      onActivate={() => {
+        rememberRecent(def.id);
+        onSelectTool(toolForDef(def), def.id);
+      }}
+    />
+  );
+
+  const toggleGroup = (groupName: string) => {
+    setExpandedGroups((prev) => (
+      prev.includes(groupName)
+        ? prev.filter((name) => name !== groupName)
+        : [...prev, groupName]
+    ));
+  };
+
   return (
     <Box id="palette" sx={{ display: 'flex', flex: 1, flexDirection: 'column', minHeight: 0, minWidth: 0, overflow: 'hidden', p: 1 }}>
       <TextField
         fullWidth
+        InputProps={{
+          startAdornment: <SearchRoundedIcon color="action" fontSize="small" sx={{ mr: 1 }} />,
+        }}
         onChange={(event) => setQuery(event.target.value)}
         placeholder="Search component…"
         size="small"
@@ -310,69 +574,265 @@ function LibraryView({
       <Box
         onWheel={forwardWheelToList}
         ref={listRef}
-        sx={{ flex: 1, minHeight: 0, minWidth: 0, mt: 1, overflowX: 'hidden', overflowY: 'auto', pr: 0.5 }}
+        sx={{
+          bgcolor: 'background.paper',
+          border: 1,
+          borderColor: 'divider',
+          borderRadius: 1.5,
+          flex: 1,
+          minHeight: 0,
+          minWidth: 0,
+          mt: 1,
+          overflowX: 'hidden',
+          overflowY: 'auto',
+          p: 0.75,
+          pr: 0.5,
+          position: 'relative',
+        }}
       >
-        {orderedGroups.map((groupName) => (
-          <Box key={groupName} sx={{ pb: 0.75 }}>
-            <Typography
-              sx={{
-                color: 'text.secondary',
-                fontSize: 11,
-                fontWeight: 700,
-                letterSpacing: '0.06em',
-                mb: 0.75,
-                mt: 1.25,
-                px: 0.5,
-                position: 'sticky',
-                textTransform: 'uppercase',
-                top: 0,
-                zIndex: 1,
-                backgroundColor: 'background.paper',
-              }}
-              variant="overline"
-            >
-              {groupName}
-            </Typography>
+        {!queryLower && recentDefs.length > 0 ? (
+          <LibrarySection
+            expanded={expandedGroups.includes('Recent')}
+            groupName="Recent"
+            onToggle={() => toggleGroup('Recent')}
+          >
             <Stack spacing={0.5}>
-              {groups.get(groupName)?.map((def) => (
-                <Button
-                  color={currentDefId === def.id ? 'primary' : 'inherit'}
-                  key={def.id}
-                  onClick={() => onSelectTool(toolForDef(def), def.id)}
-                  sx={{
-                    justifyContent: 'space-between',
-                    px: 1,
-                    py: 0.75,
-                    textTransform: 'none',
-                  }}
-                  variant={currentDefId === def.id ? 'contained' : 'text'}
-                >
-                  <Typography noWrap sx={{ flex: 1, mr: 1, textAlign: 'left' }} variant="body2">
-                    {def.displayName}
-                  </Typography>
-                  {def.shortcut ? <Chip label={def.shortcut.toUpperCase()} size="small" variant="outlined" /> : null}
-                </Button>
-              ))}
+              {recentDefs.map(renderLibraryButton)}
             </Stack>
-          </Box>
+          </LibrarySection>
+        ) : null}
+        {orderedGroups.map((groupName) => (
+          <LibrarySection
+            expanded={queryLower ? true : expandedGroups.includes(groupName)}
+            groupName={groupName}
+            key={groupName}
+            onToggle={() => toggleGroup(groupName)}
+          >
+            <Stack spacing={0.5}>
+              {groups.get(groupName)?.map(renderLibraryButton)}
+            </Stack>
+          </LibrarySection>
         ))}
       </Box>
     </Box>
   );
 }
 
+function LibrarySection({
+  children,
+  expanded,
+  groupName,
+  onToggle,
+}: {
+  children: ReactNode;
+  expanded: boolean;
+  groupName: string;
+  onToggle: () => void;
+}) {
+  return (
+    <Box
+      data-library-group={groupName}
+      sx={{
+        bgcolor: 'background.default',
+        border: 1,
+        borderColor: 'divider',
+        borderRadius: 1.5,
+        mb: 0.5,
+        overflow: 'hidden',
+      }}
+    >
+      <Button
+        data-library-group-header
+        fullWidth
+        onClick={onToggle}
+        sx={{
+          bgcolor: 'action.hover',
+          borderBottom: expanded ? 1 : 0,
+          borderColor: 'divider',
+          borderRadius: 0,
+          color: 'text.secondary',
+          justifyContent: 'space-between',
+          minHeight: 36,
+          px: 1,
+          py: 0.25,
+          textTransform: 'none',
+        }}
+        variant="text"
+      >
+        <Typography
+          sx={{
+            color: 'inherit',
+            fontSize: 11,
+            fontWeight: 700,
+            letterSpacing: '0.06em',
+            textAlign: 'left',
+            textTransform: 'uppercase',
+          }}
+          variant="overline"
+        >
+          {groupName}
+        </Typography>
+        <ExpandMoreRoundedIcon
+          fontSize="small"
+          sx={{
+            transform: expanded ? 'rotate(180deg)' : 'rotate(0deg)',
+            transition: 'transform 160ms ease',
+          }}
+        />
+      </Button>
+      {expanded ? <Box sx={{ px: 0.5, pt: 0.5, pb: 0.5 }}>{children}</Box> : null}
+    </Box>
+  );
+}
+
+function LibraryItemButton({
+  currentDefId,
+  def,
+  handle,
+  onActivate,
+}: {
+  currentDefId?: string;
+  def: ComponentDef;
+  handle: ImperativeAppHandle | null;
+  onActivate: () => void;
+}) {
+  return (
+    <Tooltip
+      arrow
+      enterDelay={1000}
+      placement="right"
+      title={<LibraryTooltipContent def={def} handle={handle} />}
+    >
+      <Button
+        color={currentDefId === def.id ? 'primary' : 'inherit'}
+        onClick={onActivate}
+        sx={{
+          alignItems: 'center',
+          borderColor: currentDefId === def.id ? undefined : 'divider',
+          display: 'flex',
+          flexDirection: 'row',
+          gap: 0.75,
+          justifyContent: 'space-between',
+          minHeight: 40,
+          px: 1,
+          py: 0.625,
+          textAlign: 'left',
+          textTransform: 'none',
+          width: '100%',
+          '&:hover': {
+            backgroundColor: 'action.hover',
+          },
+        }}
+        variant={currentDefId === def.id ? 'contained' : 'outlined'}
+      >
+        <Typography
+          sx={{
+            display: '-webkit-box',
+            flex: 1,
+            fontSize: 13,
+            lineHeight: 1.2,
+            mr: 1,
+            overflow: 'hidden',
+            textAlign: 'left',
+            WebkitBoxOrient: 'vertical',
+            WebkitLineClamp: 2,
+            wordBreak: 'break-word',
+          }}
+          variant="body2"
+        >
+          {def.displayName}
+        </Typography>
+        {def.shortcut ? <Chip label={def.shortcut.toUpperCase()} size="small" variant="outlined" /> : null}
+      </Button>
+    </Tooltip>
+  );
+}
+
+function LibraryTooltipContent({
+  def,
+  handle,
+}: {
+  def: ComponentDef;
+  handle: ImperativeAppHandle | null;
+}) {
+  const [, forceRender] = useState(0);
+  const probe = useMemo(
+    () => handle?.getLibraryPreviewProbe(def.id, () => forceRender((value) => value + 1)) ?? null,
+    [def.id, handle],
+  );
+  const previewMarkup = useMemo(
+    () => (probe?.svgMarkup ? namespaceInlineSvg(probe.svgMarkup, `library-${def.id}`) : null),
+    [def.id, probe?.svgMarkup],
+  );
+
+  return (
+    <Box sx={{ maxWidth: 260, p: 0.5 }}>
+      <Typography sx={{ fontWeight: 700 }} variant="body2">
+        {def.displayName}
+      </Typography>
+      <Typography sx={{ fontFamily: '"Roboto Mono", monospace', opacity: 0.8 }} variant="caption">
+        {def.tikzName}
+      </Typography>
+      <Box
+        sx={{
+          alignItems: 'center',
+          bgcolor: 'common.white',
+          border: 1,
+          borderColor: 'divider',
+          borderRadius: 1,
+          display: 'flex',
+          height: 112,
+          justifyContent: 'center',
+          mt: 1,
+          overflow: 'hidden',
+          px: 1,
+        }}
+      >
+        {previewMarkup ? (
+          <Box
+            dangerouslySetInnerHTML={{ __html: previewMarkup }}
+            sx={{
+              '& svg': {
+                display: 'block',
+                height: 'auto',
+                maxHeight: '96px',
+                maxWidth: '100%',
+                overflow: 'visible',
+                width: '100%',
+              },
+            }}
+          />
+        ) : (
+          <Typography color="text.secondary" variant="caption">
+            Rendering preview…
+          </Typography>
+        )}
+      </Box>
+      {def.group ? (
+        <Typography sx={{ display: 'block', mt: 0.75, opacity: 0.75 }} variant="caption">
+          {def.group}
+        </Typography>
+      ) : null}
+    </Box>
+  );
+}
+
 function PropertiesView({
   documentVersion,
+  gridPitch,
   handle,
   preamble,
   selectedIds,
+  setGridPitch,
   setPreamble,
   stopShortcutPropagation,
 }: {
   documentVersion: number;
+  gridPitch: number;
   handle: ImperativeAppHandle | null;
   preamble: string;
   selectedIds: string[];
+  setGridPitch: (value: number) => void;
   setPreamble: (value: string) => void;
   stopShortcutPropagation: (e: ReactKeyboardEvent<HTMLElement>) => void;
 }) {
@@ -398,26 +858,41 @@ function PropertiesView({
   return (
     <Stack data-version={documentVersion} id="props" spacing={1.5} sx={{ flex: 1, minHeight: 0, overflowY: 'auto', p: 2 }}>
       {selectionCount === 0 ? (
-        <TextField
-          fullWidth
-          label="Preamble"
-          multiline
-          onChange={(event) => setPreamble(event.target.value)}
-          onKeyDown={stopShortcutPropagation}
-          spellCheck={false}
-          sx={{
-            '& .MuiInputBase-root': { alignItems: 'flex-start' },
-            '& textarea': {
-              fontFamily: '"Roboto Mono", monospace',
-              fontSize: 12,
-              lineHeight: 1.5,
-              minHeight: 180,
-              whiteSpace: 'pre',
-            },
-          }}
-          value={preamble}
-          variant="outlined"
-        />
+        <>
+          <FormControl fullWidth size="small">
+            <Select
+              displayEmpty
+              onChange={(event) => setGridPitch(Number(event.target.value))}
+              renderValue={(value) => `Grid pitch: ${value}`}
+              value={String(gridPitch)}
+            >
+              <MenuItem value="0.25">0.25</MenuItem>
+              <MenuItem value="0.5">0.5</MenuItem>
+              <MenuItem value="1">1</MenuItem>
+              <MenuItem value="2">2</MenuItem>
+            </Select>
+          </FormControl>
+          <TextField
+            fullWidth
+            label="Preamble"
+            multiline
+            onChange={(event) => setPreamble(event.target.value)}
+            onKeyDown={stopShortcutPropagation}
+            spellCheck={false}
+            sx={{
+              '& .MuiInputBase-root': { alignItems: 'flex-start' },
+              '& textarea': {
+                fontFamily: '"Roboto Mono", monospace',
+                fontSize: 12,
+                lineHeight: 1.5,
+                minHeight: 180,
+                whiteSpace: 'pre',
+              },
+            }}
+            value={preamble}
+            variant="outlined"
+          />
+        </>
       ) : null}
 
       {selectionCount > 1 ? (
@@ -520,10 +995,14 @@ function useAppState(handle: ImperativeAppHandle | null) {
   const [preamble, setPreamble] = useState('');
   const [body, setBody] = useState('');
   const [copyLabel, setCopyLabel] = useState('Copy');
-  const [currentTool, setCurrentTool] = useState<ToolType>('select');
+  const [currentTool, setCurrentTool] = useState<ToolType>('move');
   const [currentDefId, setCurrentDefId] = useState<string | undefined>(undefined);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [documentVersion, setDocumentVersion] = useState(0);
+  const [gridVisible, setGridVisible] = useState(true);
+  const [gridPitch, setGridPitch] = useState(0.5);
+  const [pinSnapEnabled, setPinSnapEnabled] = useState(true);
+  const [wireRoutingMode, setWireRoutingMode] = useState<WireRoutingMode>('auto');
   const documentTextareaRef = useRef<HTMLTextAreaElement | null>(null);
 
   useEffect(() => {
@@ -534,6 +1013,10 @@ function useAppState(handle: ImperativeAppHandle | null) {
     setSelectedIds(handle.getSelectedIds());
     setPreamble(handle.getPreamble());
     setBody(handle.getBody());
+    setGridVisible(handle.getGridVisible());
+    setGridPitch(handle.getGridPitch());
+    setPinSnapEnabled(handle.getPinSnapEnabled());
+    setWireRoutingMode(handle.getWireRoutingMode());
 
     const unsubBody = handle.onBodyChange(() => {
       setBody(handle.getBody());
@@ -651,6 +1134,42 @@ function useAppState(handle: ImperativeAppHandle | null) {
     handle?.setTool(tool, defId);
   };
 
+  const onToggleGridVisible = (checked: boolean) => {
+    setGridVisible(checked);
+    handle?.setGridVisible(checked);
+  };
+
+  const onTogglePinSnap = (checked: boolean) => {
+    setPinSnapEnabled(checked);
+    handle?.setPinSnapEnabled(checked);
+  };
+
+  const onGridPitchChange = (value: number) => {
+    setGridPitch(value);
+    handle?.setGridPitch(value);
+  };
+
+  const onUndo = () => {
+    handle?.undo();
+  };
+
+  const onZoomIn = () => {
+    handle?.zoomIn();
+  };
+
+  const onZoomOut = () => {
+    handle?.zoomOut();
+  };
+
+  const onFitToScreen = () => {
+    handle?.fitToScreen();
+  };
+
+  const onWireRoutingModeChange = (mode: WireRoutingMode) => {
+    setWireRoutingMode(mode);
+    handle?.setWireRoutingMode(mode);
+  };
+
   const onClear = () => {
     handle?.clearDocument();
   };
@@ -663,15 +1182,27 @@ function useAppState(handle: ImperativeAppHandle | null) {
     documentTextareaRef,
     documentVersion,
     emitCaretSelection,
+    gridVisible,
+    gridPitch,
     onClear,
     onCopy,
     onDownloadSvg,
+    onFitToScreen,
+    onGridPitchChange,
     onSelectTool,
+    onToggleGridVisible,
+    onTogglePinSnap,
+    onUndo,
+    onWireRoutingModeChange,
+    onZoomIn,
+    onZoomOut,
+    pinSnapEnabled,
     preamble,
     selectedIds,
     setBody,
     setPreamble,
     stopShortcutPropagation,
+    wireRoutingMode,
   };
 }
 
@@ -752,10 +1283,16 @@ function CanvasViewport({
 
 function StatusBarView({
   currentTool,
+  gridVisible,
+  gridPitch,
   handle,
+  pinSnapEnabled,
 }: {
   currentTool: ToolType;
+  gridVisible: boolean;
+  gridPitch: number;
   handle: ImperativeAppHandle | null;
+  pinSnapEnabled: boolean;
 }) {
   const [coords, setCoords] = useState({ x: 0, y: 0 });
   const [zoomPercent, setZoomPercent] = useState(100);
@@ -771,6 +1308,8 @@ function StatusBarView({
 
   const toolLabel = currentTool === 'select'
     ? 'Select'
+    : currentTool === 'move'
+      ? 'Move'
     : currentTool === 'wire'
       ? 'Wire'
       : currentTool === 'delete'
@@ -792,15 +1331,25 @@ function StatusBarView({
       }}
     >
       <Typography sx={{ fontFamily: '"Roboto Mono", monospace' }} variant="caption">
-        {`X: ${formatGridCoord(coords.x)}  Y: ${formatGridCoord(coords.y)}`}
+        {`X: ${formatGridCoord(coords.x, gridPitch)}  Y: ${formatGridCoord(coords.y, gridPitch)}`}
       </Typography>
+      <Typography variant="caption">{`Grid: ${formatGridCoord(gridPitch, gridPitch)} ${gridVisible ? '' : '(hidden)'}`}</Typography>
+      <Typography variant="caption">{`Pin snap: ${pinSnapEnabled ? 'On' : 'Off'}`}</Typography>
       <Typography variant="caption">{`Zoom: ${zoomPercent}%`}</Typography>
       <Typography variant="caption">{toolLabel}</Typography>
     </Paper>
   );
 }
 
-function AppShell({ handle }: { handle: ImperativeAppHandle | null }) {
+function AppShell({
+  handle,
+  onToggleThemeMode,
+  themeMode,
+}: {
+  handle: ImperativeAppHandle | null;
+  onToggleThemeMode: () => void;
+  themeMode: 'light' | 'dark';
+}) {
   const appState = useAppState(handle);
   const [collapsed, setCollapsed] = useState({
     document: false,
@@ -820,7 +1369,23 @@ function AppShell({ handle }: { handle: ImperativeAppHandle | null }) {
 
   return (
     <>
-      <ToolbarView currentTool={appState.currentTool} onClear={appState.onClear} onSelectTool={appState.onSelectTool} />
+      <ToolbarView
+        currentTool={appState.currentTool}
+        gridVisible={appState.gridVisible}
+        onClear={appState.onClear}
+        onFitToScreen={appState.onFitToScreen}
+        onSelectTool={appState.onSelectTool}
+        onToggleGridVisible={appState.onToggleGridVisible}
+        onTogglePinSnap={appState.onTogglePinSnap}
+        onToggleThemeMode={onToggleThemeMode}
+        onUndo={appState.onUndo}
+        onWireRoutingModeChange={appState.onWireRoutingModeChange}
+        onZoomIn={appState.onZoomIn}
+        onZoomOut={appState.onZoomOut}
+        pinSnapEnabled={appState.pinSnapEnabled}
+        themeMode={themeMode}
+        wireRoutingMode={appState.wireRoutingMode}
+      />
 
       <Box
         className="left-panel"
@@ -851,14 +1416,17 @@ function AppShell({ handle }: { handle: ImperativeAppHandle | null }) {
 
         <PanelSection
           expanded={!collapsed.props}
+          grow
           onChange={() => setCollapsed((prev) => ({ ...prev, props: !prev.props }))}
           title={propertiesTitle}
         >
           <PropertiesView
             documentVersion={appState.documentVersion}
+            gridPitch={appState.gridPitch}
             handle={handle}
             preamble={appState.preamble}
             selectedIds={appState.selectedIds}
+            setGridPitch={appState.onGridPitchChange}
             setPreamble={appState.setPreamble}
             stopShortcutPropagation={appState.stopShortcutPropagation}
           />
@@ -890,13 +1458,23 @@ function AppShell({ handle }: { handle: ImperativeAppHandle | null }) {
         </PanelSection>
       </Box>
 
-      <StatusBarView currentTool={appState.currentTool} handle={handle} />
+      <StatusBarView
+        currentTool={appState.currentTool}
+        gridVisible={appState.gridVisible}
+        gridPitch={appState.gridPitch}
+        handle={handle}
+        pinSnapEnabled={appState.pinSnapEnabled}
+      />
     </>
   );
 }
 
 export function App() {
   const [handle, setHandle] = useState<ImperativeAppHandle | null>(null);
+  const [themeMode, setThemeMode] = useState<'light' | 'dark'>(() => {
+    const stored = window.localStorage.getItem('theme-mode');
+    return stored === 'light' ? 'light' : 'dark';
+  });
   const [sidebarWidth, setSidebarWidth] = useState(() => {
     const stored = window.localStorage.getItem('sidebar-width');
     const parsed = stored ? Number.parseInt(stored, 10) : DEFAULT_SIDEBAR_WIDTH;
@@ -910,6 +1488,12 @@ export function App() {
     document.documentElement.style.setProperty('--sidebar-width', `${sidebarWidth}px`);
     window.localStorage.setItem('sidebar-width', String(sidebarWidth));
   }, [sidebarWidth]);
+
+  useEffect(() => {
+    window.localStorage.setItem('theme-mode', themeMode);
+  }, [themeMode]);
+
+  const theme = useMemo(() => createTheme({ palette: { mode: themeMode } }), [themeMode]);
 
   useEffect(() => {
     const onMouseMove = (event: MouseEvent) => {
@@ -940,10 +1524,14 @@ export function App() {
   };
 
   return (
-    <ThemeProvider theme={darkTheme}>
+    <ThemeProvider theme={theme}>
       <CssBaseline />
       <>
-        <AppShell handle={handle} />
+        <AppShell
+          handle={handle}
+          onToggleThemeMode={() => setThemeMode((mode) => mode === 'dark' ? 'light' : 'dark')}
+          themeMode={themeMode}
+        />
         <div
           aria-label="Resize sidebar"
           className="sidebar-resizer"

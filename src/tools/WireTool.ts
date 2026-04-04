@@ -1,4 +1,4 @@
-import type { ConnectionRef, GridPoint } from '../types';
+import type { ConnectionRef, GridPoint, WireRoutingMode } from '../types';
 import { BaseTool } from './BaseTool';
 import { pointsEqual } from '../utils/geometry';
 import { emitWirePath } from '../codegen/WirePathEmitter';
@@ -10,8 +10,15 @@ export class WireTool extends BaseTool {
   private startRef?: ConnectionRef;
   private endRef?: ConnectionRef;
   private hoverPoint: GridPoint | null = null;
+  private routingMode: WireRoutingMode = 'auto';
+
+  setRoutingMode(mode: WireRoutingMode): void {
+    this.routingMode = mode;
+    if (this.hoverPoint) this.onMouseMove(this.hoverPoint, {} as MouseEvent);
+  }
 
   private snapConnection(gridPt: GridPoint): { point: GridPoint; ref?: ConnectionRef } {
+    if (!this.ctx.hitTester.connectionSnapEnabled) return { point: gridPt };
     return this.ctx.hitTester.findNearestConnectionTarget(gridPt, 0.5, () => {
       if (this.hoverPoint) this.onMouseMove(this.hoverPoint, {} as MouseEvent);
     }) ?? { point: gridPt };
@@ -21,6 +28,7 @@ export class WireTool extends BaseTool {
     const last = this.pathPoints[this.pathPoints.length - 1];
     if (!last) return '--';
     if (last.x === target.point.x || last.y === target.point.y) return '--';
+    if (this.routingMode !== 'auto') return this.routingMode;
     if (this.pathPoints.length >= 2) {
       const prev = this.pathPoints[this.pathPoints.length - 2];
       if (prev.y === last.y) return '|-';

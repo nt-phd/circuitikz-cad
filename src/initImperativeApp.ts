@@ -11,11 +11,12 @@ import { ToolManager } from './tools/ToolManager';
 import { parseCircuiTikZ, lineIndexFromId } from './codegen/CircuiTikZParser';
 import { extractCtikzScales, extractTikzScale, scaleState } from './canvas/ScaleState';
 import { componentProbeService } from './canvas/ComponentProbeService';
+import type { ComponentRenderProbe } from './canvas/ComponentProbeService';
 import { formatCoord } from './codegen/CoordFormatter';
 import { formatLabel } from './codegen/LabelFormatter';
 import { emitWirePath } from './codegen/WirePathEmitter';
 import { DEFAULT_BODY } from './model/LatexDocument';
-import type { ComponentInstance, WireInstance, TerminalMark, ToolType, Rotation, ComponentProps } from './types';
+import type { ComponentInstance, WireInstance, TerminalMark, ToolType, Rotation, ComponentProps, WireRoutingMode } from './types';
 import type { ToolContext } from './tools/BaseTool';
 
 let initialized = false;
@@ -99,15 +100,28 @@ export interface ImperativeAppHandle {
   getBody: () => string;
   getFullLatexSource: () => string;
   getRenderedSvg: () => string | null;
+  getLibraryPreviewProbe: (defId: string, onResolved: () => void) => ComponentRenderProbe | null;
   getSelectedComponent: () => ComponentInstance | undefined;
   getSelectedWire: () => WireInstance | undefined;
+  getGridVisible: () => boolean;
+  getGridPitch: () => number;
+  getPinSnapEnabled: () => boolean;
+  getWireRoutingMode: () => WireRoutingMode;
+  zoomIn: () => void;
+  zoomOut: () => void;
+  fitToScreen: () => void;
   setTool: (tool: ToolType, defId?: string) => void;
+  setGridVisible: (visible: boolean) => void;
+  setGridPitch: (pitch: number) => void;
+  setPinSnapEnabled: (enabled: boolean) => void;
+  setWireRoutingMode: (mode: WireRoutingMode) => void;
   setSelectedIds: (selectedIds: string[], source?: 'canvas' | 'code' | 'programmatic') => void;
   selectSourceLine: (lineIndex: number) => void;
   setPreamble: (preamble: string) => void;
   setBody: (body: string) => void;
   updateComponentProps: (id: string, props: Partial<ComponentProps>) => void;
   setComponentRotation: (id: string, rotation: Rotation) => void;
+  undo: () => void;
   commitLatexEdits: () => void;
   commitDocumentChange: () => void;
   onToolChange: (fn: (tool: ToolType, defId?: string) => void) => () => void;
@@ -131,6 +145,7 @@ async function createImperativeApp(canvasContainer: HTMLElement): Promise<Impera
   const selection = new SelectionState();
   const eventBus = new EventBus();
   const undoStack: string[] = [];
+  let gridVisible = true;
 
   const canvas = new LatexCanvas(canvasContainer, latexDoc, circuitDoc, registry, selection);
   componentProbeService.configure(() => ({ body: latexDoc.body, preamble: latexDoc.preamble }));
@@ -159,6 +174,7 @@ async function createImperativeApp(canvasContainer: HTMLElement): Promise<Impera
   };
 
   syncTikzScale();
+  scaleState.gridPitch = circuitDoc.metadata.snapSize;
 
   const toolCtx: ToolContext = {
     ghost: canvas.ghost,
@@ -275,6 +291,21 @@ async function createImperativeApp(canvasContainer: HTMLElement): Promise<Impera
     getBody: () => latexDoc.body,
     getFullLatexSource: () => latexDoc.toFullSource(),
     getRenderedSvg: () => canvas.getRenderedSvg(),
+    getLibraryPreviewProbe: (defId, onResolved) => {
+      const def = registry.get(defId);
+      if (!def) return null;
+      if (def.placementType === 'bipole') {
+        return componentProbeService.getBipoleGhostProbe(def, {
+          id: '__library_probe__',
+          defId,
+          type: 'bipole',
+          start: { x: 0, y: 0 },
+          end: { x: 2, y: 0 },
+          props: {},
+        }, onResolved);
+      }
+      return componentProbeService.getPlacedGhostProbe(def, 0, onResolved);
+    },
     getSelectedComponent: () => {
       const [id] = selection.getSelectedIds();
       return id ? circuitDoc.getComponent(id) : undefined;
@@ -283,7 +314,30 @@ async function createImperativeApp(canvasContainer: HTMLElement): Promise<Impera
       const [id] = selection.getSelectedIds();
       return id ? circuitDoc.getWire(id) : undefined;
     },
+    getGridVisible: () => gridVisible,
+    getGridPitch: () => circuitDoc.metadata.snapSize,
+    getPinSnapEnabled: () => canvas.hitTester.connectionSnapEnabled,
+    getWireRoutingMode: () => toolManager.wireRoutingMode,
+    zoomIn: () => canvas.zoomIn(),
+    zoomOut: () => canvas.zoomOut(),
+    fitToScreen: () => canvas.fitToScreen(),
     setTool: (tool, defId) => toolManager.setTool(tool, defId),
+    setGridVisible: (visible) => {
+      gridVisible = visible;
+      canvas.setGridVisible(visible);
+    },
+    setGridPitch: (pitch) => {
+      circuitDoc.metadata.snapSize = pitch;
+      scaleState.gridPitch = pitch;
+      canvas.updateGridScale();
+      canvas.refresh();
+    },
+    setPinSnapEnabled: (enabled) => {
+      canvas.hitTester.connectionSnapEnabled = enabled;
+    },
+    setWireRoutingMode: (mode) => {
+      toolManager.setWireRoutingMode(mode);
+    },
     setSelectedIds: (selectedIds, source = 'programmatic') => {
       eventBus.emit({ type: 'selection-changed', selectedIds, source });
     },
@@ -309,6 +363,9 @@ async function createImperativeApp(canvasContainer: HTMLElement): Promise<Impera
       if (comp.type === 'monopole' || comp.type === 'node') {
         comp.rotation = rotation;
       }
+    },
+    undo: () => {
+      toolCtx.undo();
     },
     commitLatexEdits: () => {
       pushUndoSnapshot();
