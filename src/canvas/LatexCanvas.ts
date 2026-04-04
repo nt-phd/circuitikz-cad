@@ -259,9 +259,12 @@ export class LatexCanvas {
     const wrapper = document.createElement('div');
     wrapper.className = 'ghost-latex-probe';
     const ptToPx = BASE_PT_TO_PX;
-    wrapper.style.left = `${preview.anchorX - preview.tx * ptToPx}px`;
-    wrapper.style.top = `${preview.anchorY - preview.ty * ptToPx}px`;
+    const originX = preview.tx * ptToPx;
+    const originY = preview.ty * ptToPx;
+    wrapper.style.left = `${preview.anchorX - originX}px`;
+    wrapper.style.top = `${preview.anchorY - originY}px`;
     wrapper.style.opacity = String(preview.opacity);
+    wrapper.style.transformOrigin = `${originX}px ${originY}px`;
     if (preview.angleDeg) wrapper.style.transform = `rotate(${preview.angleDeg}deg)`;
 
     wrapper.innerHTML = this.namespaceSvgMarkup(preview.svgMarkup);

@@ -81,7 +81,7 @@ export class GhostRenderer {
     return g;
   }
 
-  buildBipoleGhost(defId: string, start: GridPoint, end: GridPoint): SVGGElement | null {
+  buildBipoleGhost(defId: string, start: GridPoint, end: GridPoint, showLatexPreview = true): SVGGElement | null {
     const gs = this.gs;
     const sx = start.x * gs, sy = start.y * gs;
     const ex = end.x   * gs, ey = end.y   * gs;
@@ -100,8 +100,10 @@ export class GhostRenderer {
         end,
         props: {},
       };
-      const probe = componentProbeService.getBipoleGhostProbe(def, ghostComp, () => this.setGhostElement(this.buildBipoleGhost(defId, start, end)));
-      if (probe) {
+      const probe = showLatexPreview
+        ? componentProbeService.getBipoleGhostProbe(def, ghostComp, () => this.setGhostElement(this.buildBipoleGhost(defId, start, end, true)))
+        : null;
+      if (probe && showLatexPreview) {
         this.setLatexGhostPreview({
           anchorX: sx,
           anchorY: sy,
