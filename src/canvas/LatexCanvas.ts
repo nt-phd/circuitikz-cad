@@ -21,7 +21,7 @@ import type { ComponentRegistry } from '../definitions/ComponentRegistry';
 import type { SelectionState } from '../model/SelectionState';
 import { ViewTransform } from './ViewTransform';
 import { SnapEngine } from './SnapEngine';
-import { GhostRenderer } from './GhostRenderer';
+import { GhostRenderer, type GhostLatexPreview } from './GhostRenderer';
 import { HitTester } from './HitTester';
 import {
   GRID_SIZE, TIKZ_PT_PER_UNIT, RENDER_SERVER_URL,
@@ -44,6 +44,7 @@ export class LatexCanvas {
   private worldDiv: HTMLDivElement;
   private gridSvg: SVGSVGElement;
   private latexDiv: HTMLDivElement;
+  private ghostLatexDiv: HTMLDivElement;
   readonly overlaySvg: SVGSVGElement;
 
   private renderInFlight = false;
@@ -58,6 +59,7 @@ export class LatexCanvas {
   private gridRectMinor!: SVGRectElement;
   private gridRectMajor!: SVGRectElement;
   private interactionRect!: SVGRectElement;
+  private ghostSvgNonce = 0;
 
   // Pan/zoom
   private spaceHeld = false;
@@ -92,6 +94,10 @@ export class LatexCanvas {
     this.latexDiv.className = 'latex-layer';
     this.worldDiv.appendChild(this.latexDiv);
 
+    this.ghostLatexDiv = document.createElement('div');
+    this.ghostLatexDiv.className = 'ghost-latex-layer';
+    this.worldDiv.appendChild(this.ghostLatexDiv);
+
     // Overlay SVG (grid + ghost + selection)
     this.overlaySvg = createSvgElement('svg', {
       class: 'overlay-layer',
@@ -110,7 +116,13 @@ export class LatexCanvas {
     this.buildGrid();
 
     this.hitTester = new HitTester(circuitDoc, registry);
-    this.ghost = new GhostRenderer(this.overlaySvg, circuitDoc, registry, selection);
+    this.ghost = new GhostRenderer(
+      this.overlaySvg,
+      circuitDoc,
+      registry,
+      selection,
+      (preview) => this.setGhostLatexPreview(preview),
+    );
 
     this.attachPanZoom();
 
@@ -238,6 +250,75 @@ export class LatexCanvas {
     // Align TikZ(0,0) with world origin
     this.latexDiv.style.left = (-tx * ptToPx) + 'px';
     this.latexDiv.style.top  = (-ty * ptToPx) + 'px';
+  }
+
+  private setGhostLatexPreview(preview: GhostLatexPreview | null): void {
+    this.ghostLatexDiv.innerHTML = '';
+    if (!preview) return;
+
+    const wrapper = document.createElement('div');
+    wrapper.className = 'ghost-latex-probe';
+    const ptToPx = BASE_PT_TO_PX;
+    wrapper.style.left = `${preview.anchorX - preview.tx * ptToPx}px`;
+    wrapper.style.top = `${preview.anchorY - preview.ty * ptToPx}px`;
+    wrapper.style.opacity = String(preview.opacity);
+    if (preview.angleDeg) wrapper.style.transform = `rotate(${preview.angleDeg}deg)`;
+
+    wrapper.innerHTML = this.namespaceSvgMarkup(preview.svgMarkup);
+    const svgEl = wrapper.querySelector('svg');
+    if (!svgEl) return;
+
+    const vb = svgEl.getAttribute('viewBox')?.split(/\s+/).map(Number);
+    if (vb && vb.length >= 4) {
+      svgEl.style.width = `${vb[2] * ptToPx}px`;
+      svgEl.style.height = `${vb[3] * ptToPx}px`;
+    }
+    svgEl.removeAttribute('width');
+    svgEl.removeAttribute('height');
+    svgEl.style.display = 'block';
+    svgEl.style.overflow = 'visible';
+
+    this.ghostLatexDiv.appendChild(wrapper);
+  }
+
+  private namespaceSvgMarkup(svgMarkup: string): string {
+    const parser = new DOMParser();
+    const doc = parser.parseFromString(svgMarkup, 'image/svg+xml');
+    const svg = doc.querySelector('svg');
+    if (!svg) return svgMarkup;
+
+    const prefix = `ghost-${++this.ghostSvgNonce}-`;
+    const idMap = new Map<string, string>();
+    for (const el of svg.querySelectorAll('[id]')) {
+      const oldId = el.getAttribute('id');
+      if (!oldId) continue;
+      const newId = `${prefix}${oldId}`;
+      idMap.set(oldId, newId);
+      el.setAttribute('id', newId);
+    }
+
+    const rewriteValue = (value: string | null): string | null => {
+      if (!value) return value;
+      let next = value;
+      for (const [oldId, newId] of idMap) {
+        next = next.replaceAll(`url(#${oldId})`, `url(#${newId})`);
+        next = next.replaceAll(`#${oldId}`, `#${newId}`);
+      }
+      return next;
+    };
+
+    for (const el of svg.querySelectorAll('*')) {
+      for (const attr of ['href', 'xlink:href', 'clip-path', 'fill', 'filter', 'mask', 'marker-start', 'marker-mid', 'marker-end']) {
+        const value = el.getAttribute(attr);
+        const rewritten = rewriteValue(value);
+        if (rewritten && rewritten !== value) el.setAttribute(attr, rewritten);
+      }
+      const style = el.getAttribute('style');
+      const rewrittenStyle = rewriteValue(style);
+      if (rewrittenStyle && rewrittenStyle !== style) el.setAttribute('style', rewrittenStyle);
+    }
+
+    return svg.outerHTML;
   }
 
   // ====== ERROR BANNER ======

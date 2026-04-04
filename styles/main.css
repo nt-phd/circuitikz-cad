@@ -109,7 +109,26 @@ body.is-resizing-sidebar {
   pointer-events: none;
 }
 
+.ghost-latex-layer {
+  position: absolute;
+  top: 0;
+  left: 0;
+  pointer-events: none;
+}
+
 .latex-layer svg {
+  display: block;
+  overflow: visible;
+}
+
+.ghost-latex-probe {
+  position: absolute;
+  top: 0;
+  left: 0;
+  transform-origin: 0 0;
+}
+
+.ghost-latex-layer svg {
   display: block;
   overflow: visible;
 }

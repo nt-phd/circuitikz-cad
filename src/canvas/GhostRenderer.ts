@@ -7,7 +7,7 @@ import type { GridPoint, BipoleInstance, ComponentInstance, ComponentDef, WireIn
 import type { ComponentRegistry } from '../definitions/ComponentRegistry';
 import type { SelectionState } from '../model/SelectionState';
 import type { CircuitDocument } from '../model/CircuitDocument';
-import { SELECTION_COLOR, GHOST_OPACITY, TIKZ_PT_PER_UNIT, GRID_SIZE } from '../constants';
+import { SELECTION_COLOR, GHOST_OPACITY } from '../constants';
 import { scaleState } from './ScaleState';
 import { createGroup, createLine, createRect } from '../utils/svg';
 import { getBipoleBodyMetrics, getPlacedComponentMetrics } from './ComponentGeometry';
@@ -18,6 +18,16 @@ const SELECTION_LINE_OPACITY = 1;
 const GHOST_LINE_OPACITY = 0.8;
 const OVERLAY_CROSS_SIZE = 0.15;
 
+export interface GhostLatexPreview {
+  anchorX: number;
+  anchorY: number;
+  angleDeg?: number;
+  opacity: number;
+  svgMarkup: string;
+  tx: number;
+  ty: number;
+}
+
 export class GhostRenderer {
   private ghostGroup: SVGGElement;
   private selectionGroup: SVGGElement;
@@ -27,6 +37,7 @@ export class GhostRenderer {
     private doc: CircuitDocument,
     private registry: ComponentRegistry,
     private selection: SelectionState,
+    private setLatexGhostPreview: (preview: GhostLatexPreview | null) => void,
   ) {
     this.ghostGroup = createGroup('ghost');
     this.selectionGroup = createGroup('selection');
@@ -40,6 +51,7 @@ export class GhostRenderer {
 
   setGhostElement(el: SVGElement | null): void {
     this.ghostGroup.innerHTML = '';
+    if (!el) this.setLatexGhostPreview(null);
     if (el) {
       el.setAttribute('opacity', String(GHOST_OPACITY));
       this.ghostGroup.appendChild(el);
@@ -47,6 +59,7 @@ export class GhostRenderer {
   }
 
   buildMarqueeGhost(start: GridPoint, end: GridPoint): SVGGElement {
+    this.setLatexGhostPreview(null);
     const gs = this.gs;
     const x1 = start.x * gs;
     const y1 = start.y * gs;
@@ -88,8 +101,18 @@ export class GhostRenderer {
         props: {},
       };
       const probe = componentProbeService.getBipoleGhostProbe(def, ghostComp, () => this.setGhostElement(this.buildBipoleGhost(defId, start, end)));
-      if (probe) this.appendProbeSvg(g, sx, sy, probe, GHOST_OPACITY, angleDeg);
-      if (!probe) {
+      if (probe) {
+        this.setLatexGhostPreview({
+          anchorX: sx,
+          anchorY: sy,
+          angleDeg,
+          opacity: GHOST_OPACITY,
+          svgMarkup: probe.svgMarkup,
+          tx: probe.tx,
+          ty: probe.ty,
+        });
+      } else {
+        this.setLatexGhostPreview(null);
         const { bodyWidth, bodyHeight, bodyX, bodyY } = getBipoleBodyMetrics(def, gs, dist);
         const body = createGroup('ghost-bipole-body');
         body.setAttribute('transform', `translate(${sx}, ${sy}) rotate(${angleDeg})`);
@@ -110,6 +133,7 @@ export class GhostRenderer {
   }
 
   buildWireGhost(points: GridPoint[]): SVGGElement | null {
+    this.setLatexGhostPreview(null);
     if (points.length < 2) return null;
     const gs = this.gs;
     const g = createGroup('ghost-wire');
@@ -127,10 +151,26 @@ export class GhostRenderer {
   buildMonopoleGhost(defId: string, position: GridPoint, rotation = 0): SVGGElement | null {
     const def = this.registry.get(defId);
     if (!def) return null;
-    const ghost = this.buildPlacedComponentSelection(position.x, position.y, def, rotation, true);
-    if (!ghost) return null;
+    const probe = componentProbeService.getPlacedGhostProbe(def, rotation, () => this.setGhostElement(this.buildMonopoleGhost(defId, position, rotation)));
+    if (probe) {
+      this.setLatexGhostPreview({
+        anchorX: position.x * this.gs,
+        anchorY: position.y * this.gs,
+        opacity: GHOST_OPACITY,
+        svgMarkup: probe.svgMarkup,
+        tx: probe.tx,
+        ty: probe.ty,
+      });
+    } else {
+      this.setLatexGhostPreview(null);
+    }
     const g = createGroup('ghost-monopole');
-    g.appendChild(ghost);
+    if (!probe) {
+      const ghost = this.buildPlacedComponentSelection(position.x, position.y, def, rotation, true);
+      if (ghost) g.appendChild(ghost);
+    } else {
+      g.appendChild(this.crossAt(position.x * this.gs, position.y * this.gs, this.gs * OVERLAY_CROSS_SIZE, GHOST_LINE_OPACITY));
+    }
     return g;
   }
 
@@ -272,39 +312,6 @@ export class GhostRenderer {
       }
     }
     return g;
-  }
-
-  private appendProbeSvg(
-    parent: SVGGElement,
-    anchorX: number,
-    anchorY: number,
-    probe: ComponentRenderProbe,
-    opacity: number,
-    rotationDeg = 0,
-  ): void {
-    const parser = new DOMParser();
-    const doc = parser.parseFromString(probe.svgMarkup, 'image/svg+xml');
-    const nestedSvg = doc.querySelector('svg');
-    if (!nestedSvg) return;
-    const imported = document.importNode(nestedSvg, true) as SVGSVGElement;
-    const ptToPx = GRID_SIZE / TIKZ_PT_PER_UNIT;
-    const wrapper = createGroup('probe-svg');
-    wrapper.setAttribute('transform', `translate(${anchorX}, ${anchorY}) rotate(${rotationDeg})`);
-    imported.setAttribute('overflow', 'visible');
-    imported.style.overflow = 'visible';
-    imported.setAttribute('opacity', String(opacity));
-    const vb = imported.getAttribute('viewBox')?.split(/\s+/).map(Number);
-    if (vb && vb.length >= 4) {
-      imported.setAttribute('width', String(vb[2] * ptToPx));
-      imported.setAttribute('height', String(vb[3] * ptToPx));
-      imported.setAttribute('x', String(-probe.tx * ptToPx));
-      imported.setAttribute('y', String(-probe.ty * ptToPx));
-      imported.setAttribute('viewBox', vb.join(' '));
-    } else {
-      imported.setAttribute('transform', `translate(${-probe.tx * ptToPx}, ${-probe.ty * ptToPx}) scale(${ptToPx})`);
-    }
-    wrapper.appendChild(imported);
-    parent.appendChild(wrapper);
   }
 
   private projectPlacedPin(

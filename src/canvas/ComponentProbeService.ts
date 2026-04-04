@@ -16,6 +16,7 @@ interface ProbeMarkerSpec {
 
 interface ProbeRequest {
   cacheKey: string;
+  displayLatex?: string;
   latex: string;
   markers: ProbeMarkerSpec[];
 }
@@ -239,8 +240,19 @@ function buildPlacedProbeFromSource(source: { body: string; preamble: string }, 
     markerLines.splice(0, markerLines.length, `\\fill[${markers[0].latexColorName}] (0,0) circle[radius=0.08];`);
   }
 
+  const displayLatex = [
+    '\\documentclass[tikz,border=2pt]{standalone}',
+    source.preamble,
+    '\\begin{document}',
+    `\\begin{tikzpicture}${tikzOptions}`,
+    probeLine,
+    '\\end{tikzpicture}',
+    '\\end{document}',
+  ].join('\n');
+
   return {
     cacheKey: `placed:${source.preamble}\n@@\n${source.body}\n@@\n${sourceLine}\n@@\n${def.id}`,
+    displayLatex,
     markers,
     latex: [
       '\\documentclass[tikz,border=2pt]{standalone}',
@@ -272,8 +284,19 @@ function buildPlacedGhostProbe(source: { body: string; preamble: string }, def: 
   if (pinNames.length === 0) {
     markerLines.splice(0, markerLines.length, `\\fill[${markers[0].latexColorName}] (0,0) circle[radius=0.08];`);
   }
+  const displayLatex = [
+    '\\documentclass[tikz,border=2pt]{standalone}',
+    source.preamble,
+    '\\begin{document}',
+    `\\begin{tikzpicture}${tikzOptions}`,
+    probeLine,
+    '\\end{tikzpicture}',
+    '\\end{document}',
+  ].join('\n');
+
   return {
     cacheKey: `ghost-placed:${source.preamble}\n@@\n${source.body}\n@@\n${def.id}\n@@\n${rotation}`,
+    displayLatex,
     markers,
     latex: [
       '\\documentclass[tikz,border=2pt]{standalone}',
@@ -301,8 +324,20 @@ function buildBipoleProbeLatex(source: { body: string; preamble: string }, sourc
     { name: 'START', target: '', color: MARKER_PALETTE[0], latexColorName: 'probeMarker0' },
     { name: 'END', target: '', color: MARKER_PALETTE[1], latexColorName: 'probeMarker1' },
   ];
+  const cleanDraw = `${bipoleStmt[1]}(0,0) to[${bipoleStmt[3]}] (${dist},0);`;
+  const displayLatex = [
+    '\\documentclass[tikz,border=2pt]{standalone}',
+    source.preamble,
+    '\\begin{document}',
+    `\\begin{tikzpicture}${tikzOptions}`,
+    cleanDraw,
+    '\\end{tikzpicture}',
+    '\\end{document}',
+  ].join('\n');
+
   return {
     cacheKey: `bipole:${source.preamble}\n@@\n${source.body}\n@@\n${sourceLine}`,
+    displayLatex,
     markers,
     latex: [
       '\\documentclass[tikz,border=2pt]{standalone}',
@@ -310,7 +345,7 @@ function buildBipoleProbeLatex(source: { body: string; preamble: string }, sourc
       ...buildMarkerColorDefs(markers),
       '\\begin{document}',
       `\\begin{tikzpicture}${tikzOptions}`,
-      `${bipoleStmt[1]}(0,0) to[${bipoleStmt[3]}] (${dist},0);`,
+      cleanDraw,
       `\\fill[${markers[0].latexColorName}] (0,0) circle[radius=0.08];`,
       `\\fill[${markers[1].latexColorName}] (${dist},0) circle[radius=0.08];`,
       '\\end{tikzpicture}',
@@ -326,8 +361,20 @@ function buildBipoleGhostProbe(source: { body: string; preamble: string }, def: 
     { name: 'START', target: '', color: MARKER_PALETTE[0], latexColorName: 'probeMarker0' },
     { name: 'END', target: '', color: MARKER_PALETTE[1], latexColorName: 'probeMarker1' },
   ];
+  const cleanDraw = `\\draw (0,0) to[${def.tikzName}] (${dist},0);`;
+  const displayLatex = [
+    '\\documentclass[tikz,border=2pt]{standalone}',
+    source.preamble,
+    '\\begin{document}',
+    `\\begin{tikzpicture}${tikzOptions}`,
+    cleanDraw,
+    '\\end{tikzpicture}',
+    '\\end{document}',
+  ].join('\n');
+
   return {
     cacheKey: `ghost-bipole:${source.preamble}\n@@\n${source.body}\n@@\n${def.id}\n@@\n${dist}`,
+    displayLatex,
     markers,
     latex: [
       '\\documentclass[tikz,border=2pt]{standalone}',
@@ -335,7 +382,7 @@ function buildBipoleGhostProbe(source: { body: string; preamble: string }, def: 
       ...buildMarkerColorDefs(markers),
       '\\begin{document}',
       `\\begin{tikzpicture}${tikzOptions}`,
-      `\\draw (0,0) to[${def.tikzName}] (${dist},0);`,
+      cleanDraw,
       `\\fill[${markers[0].latexColorName}] (0,0) circle[radius=0.08];`,
       `\\fill[${markers[1].latexColorName}] (${dist},0) circle[radius=0.08];`,
       '\\end{tikzpicture}',
@@ -414,7 +461,38 @@ export class ComponentProbeService {
     });
     const data = await response.json() as { svg?: string; tx?: number; ty?: number };
     if (!data.svg) return null;
-    return measureProbeSvg(data.svg, data.tx ?? 0, data.ty ?? 0, request.markers);
+    const measured = measureProbeSvg(data.svg, data.tx ?? 0, data.ty ?? 0, request.markers);
+    if (!measured) return null;
+    if (!request.displayLatex) return measured;
+
+    try {
+      const displayResponse = await fetch(`${RENDER_SERVER_URL}/render`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ latex: request.displayLatex }),
+        signal: AbortSignal.timeout(30000),
+      });
+      const displayData = await displayResponse.json() as { svg?: string; tx?: number; ty?: number };
+      if (displayData.svg) {
+        const displayTx = displayData.tx ?? measured.tx;
+        const displayTy = displayData.ty ?? measured.ty;
+        const dx = (measured.tx - displayTx) * PT_TO_PX;
+        const dy = (measured.ty - displayTy) * PT_TO_PX;
+        measured.pinOffsets = measured.pinOffsets.map((pin) => ({
+          ...pin,
+          x: pin.x + dx,
+          y: pin.y + dy,
+        }));
+        measured.bboxLeft += dx;
+        measured.bboxTop += dy;
+        measured.tx = displayTx;
+        measured.ty = displayTy;
+        measured.svgMarkup = displayData.svg;
+      }
+    } catch {
+      // Keep the measured+stripped SVG as fallback.
+    }
+    return measured;
   }
 }
 
