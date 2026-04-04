@@ -846,24 +846,30 @@ function LibraryTooltipContent({
           borderColor: 'divider',
           borderRadius: 1,
           display: 'flex',
-          height: 112,
+          height: 224,
           justifyContent: 'center',
           mt: 1,
           overflow: 'hidden',
-          px: 1,
+          px: 2,
+          py: 1.5,
         }}
       >
         {previewMarkup ? (
           <Box
             dangerouslySetInnerHTML={{ __html: previewMarkup }}
             sx={{
+              alignItems: 'center',
+              display: 'flex',
+              justifyContent: 'center',
               '& svg': {
                 display: 'block',
                 height: 'auto',
-                maxHeight: '96px',
+                maxHeight: '176px',
                 maxWidth: '100%',
                 overflow: 'visible',
-                width: '100%',
+                transform: 'scale(2)',
+                transformOrigin: 'center center',
+                width: 'auto',
               },
             }}
           />
