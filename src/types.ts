@@ -82,6 +82,9 @@ export interface ComponentProps {
   value?: string;
   voltage?: string;
   current?: string;
+  options?: string;
+  text?: string;
+  textAnchor?: string;
   startTerminal?: TerminalMark;
   endTerminal?: TerminalMark;
 }

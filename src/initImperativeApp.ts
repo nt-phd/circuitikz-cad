@@ -49,11 +49,23 @@ function emitComponentLine(comp: ComponentInstance): string | null {
   }
   if (comp.type === 'monopole') {
     const nodeName = comp.nodeName ? `(${comp.nodeName})` : '';
-    return `\\node[${tikzName}]${nodeName} at ${formatCoord(comp.position)} {};`;
+    const options = comp.props.options ? `, ${comp.props.options}` : '';
+    const base = `\\node[${tikzName}${options}]${nodeName} at ${formatCoord(comp.position)} {};`;
+    if (comp.nodeName && comp.props.text) {
+      const anchor = comp.props.textAnchor || 'center';
+      return `${base} node[anchor=${anchor}] at (${comp.nodeName}.text){${comp.props.text}};`;
+    }
+    return base;
   }
   if (comp.type === 'node') {
     const nodeName = comp.nodeName ? `(${comp.nodeName})` : '';
-    return `\\node[${tikzName}]${nodeName} at ${formatCoord(comp.position)} {};`;
+    const options = comp.props.options ? `, ${comp.props.options}` : '';
+    const base = `\\node[${tikzName}${options}]${nodeName} at ${formatCoord(comp.position)} {};`;
+    if (comp.nodeName && comp.props.text) {
+      const anchor = comp.props.textAnchor || 'center';
+      return `${base} node[anchor=${anchor}] at (${comp.nodeName}.text){${comp.props.text}};`;
+    }
+    return base;
   }
   return null;
 }
@@ -84,13 +96,8 @@ function updateBodyLinePreservingStructure(body: string, lineIndex: number, repl
   const lines = body.split('\n');
   if (lineIndex < 0 || lineIndex >= lines.length) return body;
   const original = lines[lineIndex];
-
-  if (kind === 'component' && original.includes('\\node') && original.includes(' at ')) {
-    lines[lineIndex] = original.replace(/at\s*\(\s*[-\d.]+\s*,\s*[-\d.]+\s*\)/, `at ${replacement.match(/\([^)]+\)/)?.[0] ?? ''}`);
-  } else {
-    const indent = original.match(/^\s*/)?.[0] ?? '';
-    lines[lineIndex] = `${indent}${replacement}`;
-  }
+  const indent = original.match(/^\s*/)?.[0] ?? '';
+  lines[lineIndex] = `${indent}${replacement}`;
 
   return lines.join('\n');
 }

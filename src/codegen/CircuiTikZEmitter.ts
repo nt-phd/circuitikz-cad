@@ -75,8 +75,15 @@ export class CircuiTikZEmitter {
   }
 
   private emitPlacedNode(comp: MonopoleInstance | NodeInstance, tikzName: string): string {
+    const optionParts = [tikzName];
+    if (comp.props.options) optionParts.push(comp.props.options);
     const nodeName = comp.nodeName ? `(${comp.nodeName})` : '';
-    return `\\node[${tikzName}]${nodeName} at ${formatCoord(comp.position)} {};`;
+    const base = `\\node[${optionParts.join(', ')}]${nodeName} at ${formatCoord(comp.position)} {};`;
+    if (comp.nodeName && comp.props.text) {
+      const anchor = comp.props.textAnchor || 'center';
+      return `${base} node[anchor=${anchor}] at (${comp.nodeName}.text){${comp.props.text}};`;
+    }
+    return base;
   }
 
   private emitDrawing(drawing: DrawingInstance): string {

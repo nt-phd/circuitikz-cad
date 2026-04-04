@@ -2,13 +2,26 @@ import type { ComponentInstance, ComponentDef, ConnectionRef, GridPoint, SymbolP
 import { getPlacedComponentMetrics } from './ComponentGeometry';
 import { pickPrimaryPin } from './ComponentProbeService';
 
-function projectPin(position: GridPoint, rotation: number, localX: number, localY: number): GridPoint {
+function parseScaleModifiers(options?: string): { xScale: number; yScale: number } {
+  if (!options) return { xScale: 1, yScale: 1 };
+  const xMatch = options.match(/\bxscale\s*=\s*(-?[0-9]*\.?[0-9]+)/);
+  const yMatch = options.match(/\byscale\s*=\s*(-?[0-9]*\.?[0-9]+)/);
+  return {
+    xScale: xMatch ? Number.parseFloat(xMatch[1]) : 1,
+    yScale: yMatch ? Number.parseFloat(yMatch[1]) : 1,
+  };
+}
+
+function projectPin(position: GridPoint, rotation: number, localX: number, localY: number, options?: string): GridPoint {
+  const { xScale, yScale } = parseScaleModifiers(options);
+  const scaledX = localX * xScale;
+  const scaledY = localY * yScale;
   const angle = rotation * Math.PI / 180;
   const cos = Math.cos(angle);
   const sin = Math.sin(angle);
   return {
-    x: position.x + localX * cos - localY * sin,
-    y: position.y + localX * sin + localY * cos,
+    x: position.x + scaledX * cos - scaledY * sin,
+    y: position.y + scaledX * sin + scaledY * cos,
   };
 }
 
@@ -40,7 +53,7 @@ export function getComponentAnchorPoints(comp: ComponentInstance, def: Component
   const anchorPins = pins.length > 0 ? pins : [{ name: 'reference', x: 0, y: 0 }];
 
   return anchorPins.map((pin) => ({
-    point: projectPin(comp.position, comp.rotation ?? 0, pin.x * scale, pin.y * scale),
+    point: projectPin(comp.position, comp.rotation ?? 0, pin.x * scale, pin.y * scale, comp.props.options),
     ref: nodeName ? { componentId: comp.id, nodeName, anchor: pin.name } : undefined,
   }));
 }

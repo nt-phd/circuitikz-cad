@@ -887,6 +887,9 @@ function PropertiesView({
   const [draftComponentProps, setDraftComponentProps] = useState({
     current: comp?.props.current ?? '',
     label: comp?.props.label ?? '',
+    options: comp?.props.options ?? '',
+    text: comp?.props.text ?? '',
+    textAnchor: comp?.props.textAnchor ?? 'center',
     value: comp?.props.value ?? '',
     voltage: comp?.props.voltage ?? '',
   });
@@ -903,10 +906,13 @@ function PropertiesView({
     setDraftComponentProps({
       current: comp?.props.current ?? '',
       label: comp?.props.label ?? '',
+      options: comp?.props.options ?? '',
+      text: comp?.props.text ?? '',
+      textAnchor: comp?.props.textAnchor ?? 'center',
       value: comp?.props.value ?? '',
       voltage: comp?.props.voltage ?? '',
     });
-  }, [comp?.id, comp?.props.current, comp?.props.label, comp?.props.value, comp?.props.voltage, documentVersion]);
+  }, [comp?.id, comp?.props.current, comp?.props.label, comp?.props.options, comp?.props.text, comp?.props.textAnchor, comp?.props.value, comp?.props.voltage, documentVersion]);
 
   useEffect(() => {
     setDraftDrawingProps({
@@ -1105,9 +1111,58 @@ function PropertiesView({
           ) : null}
 
           {comp.type !== 'bipole' ? (
-            <Typography color="text.secondary" variant="caption">
-              No editable properties are wired yet for this component type. Selection and placement are supported; advanced options still need explicit emitter support.
-            </Typography>
+            <>
+              <TextField
+                fullWidth
+                label="Node options"
+                onBlur={() => commitComponentProp('options')}
+                onChange={(event) => setDraftComponentProps((prev) => ({ ...prev, options: event.target.value }))}
+                onKeyDown={stopShortcutPropagation}
+                placeholder="yscale=-1"
+                size="small"
+                value={draftComponentProps.options}
+              />
+              <TextField
+                fullWidth
+                label="Node text"
+                onBlur={() => commitComponentProp('text')}
+                onChange={(event) => setDraftComponentProps((prev) => ({ ...prev, text: event.target.value }))}
+                onKeyDown={stopShortcutPropagation}
+                placeholder="$U_1$"
+                size="small"
+                value={draftComponentProps.text}
+              />
+              <FormControl fullWidth size="small">
+                <Select
+                  displayEmpty
+                  onChange={(event) => {
+                    const value = event.target.value;
+                    setDraftComponentProps((prev) => ({ ...prev, textAnchor: value }));
+                    updateComponentProps({ textAnchor: value || undefined });
+                  }}
+                  value={draftComponentProps.textAnchor}
+                >
+                  <MenuItem value="center">Text anchor: center</MenuItem>
+                  <MenuItem value="north">Text anchor: north</MenuItem>
+                  <MenuItem value="south">Text anchor: south</MenuItem>
+                  <MenuItem value="east">Text anchor: east</MenuItem>
+                  <MenuItem value="west">Text anchor: west</MenuItem>
+                </Select>
+              </FormControl>
+              <ToggleButtonGroup
+                exclusive
+                onChange={updateRotation}
+                size="small"
+                sx={{ alignSelf: 'flex-start' }}
+                value={comp.rotation}
+              >
+                {[0, 90, 180, 270].map((rotation) => (
+                  <ToggleButton key={rotation} value={rotation}>
+                    {rotation}°
+                  </ToggleButton>
+                ))}
+              </ToggleButtonGroup>
+            </>
           ) : null}
         </>
       ) : null}

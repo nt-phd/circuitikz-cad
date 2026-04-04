@@ -208,7 +208,7 @@ export class GhostRenderer {
       const a = wire.points[i], b = wire.points[i + 1];
       g.appendChild(this.createOverlayLine(
         a.x * gs, a.y * gs, b.x * gs, b.y * gs,
-        {},
+        { 'stroke-dasharray': '4 3', opacity: GHOST_LINE_OPACITY },
       ));
     }
     return g;

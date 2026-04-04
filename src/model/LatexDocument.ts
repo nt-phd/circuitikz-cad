@@ -32,7 +32,7 @@ export const DEFAULT_BODY = `\\begin{tikzpicture}[scale=0.7]
 
 \\draw (3,-0.5) -- (3, 1);
 \\draw (5,-0.5) |- (N1.out);
-\\draw (1, -1) -- (1, 2.5) |- (N1.-);
+\\draw (1, -1) |- (N1.-);
 \\draw (1, -1) to[american resistor, l={$R_0$}] (1, -3);
 
 \\node[sground] at (1, -3){};

@@ -214,17 +214,18 @@ function addPlacedComponent(
   tikzName: string,
   position: GridPoint,
   nodeName?: string,
+  props: ComponentProps = {},
 ): void {
   const defId = tikzToDefId.get(tikzName) ?? tikzName;
   const def = registry.get(defId);
   if (def?.placementType === 'node') {
     const comp: NodeInstance = {
-      id, defId, type: 'node', nodeName, position, rotation: 0, mirror: 'none', props: {},
+      id, defId, type: 'node', nodeName, position, rotation: 0, mirror: 'none', props,
     };
     doc.addComponent(comp);
     return;
   }
-  const comp: MonopoleInstance = { id, defId, type: 'monopole', nodeName, position, rotation: 0, props: {} };
+  const comp: MonopoleInstance = { id, defId, type: 'monopole', nodeName, position, rotation: 0, props };
   doc.addComponent(comp);
 }
 
@@ -279,11 +280,21 @@ export function parseCircuiTikZ(
     // Stable ID = 'line:<lineIndex>'
     const id = `line:${lineIndex}`;
 
-    const nodeStmtMatch = stmt.match(/^\\node\s*\[([^\]]+)\](?:\(([^)]+)\))?\s+at\s+(\([^)]+\))\s*\{[\s\S]*?\}(?:\s+.*)?$/);
+    const nodeStmtMatch = stmt.match(/^\\node\s*\[([^\]]+)\](?:\(([^)]+)\))?\s+at\s+(\([^)]+\))\s*\{[\s\S]*?\}(?:\s+node\[(.*?)\]\s+at\s+\(([^)]+)\)\s*\{([\s\S]*?)\})?$/);
     if (nodeStmtMatch) {
       const position = parseCoord(nodeStmtMatch[3]);
-      const tikzName = splitOptions(nodeStmtMatch[1])[0]?.trim();
-      if (position && tikzName) addPlacedComponent(doc, registry, tikzToDefId, id, tikzName, position, nodeStmtMatch[2]?.trim());
+      const opts = splitOptions(nodeStmtMatch[1]);
+      const tikzName = opts[0]?.trim();
+      const extraOptions = opts.slice(1).join(', ').trim() || undefined;
+      const textAnchorOpts = nodeStmtMatch[4] ? extractKV(splitOptions(nodeStmtMatch[4])) : {};
+      const textTarget = nodeStmtMatch[5]?.trim();
+      const text = nodeStmtMatch[6];
+      const props: ComponentProps = {
+        options: extraOptions,
+        text: textTarget?.endsWith('.text') ? text : undefined,
+        textAnchor: textTarget?.endsWith('.text') ? (textAnchorOpts.anchor ?? 'center') : undefined,
+      };
+      if (position && tikzName) addPlacedComponent(doc, registry, tikzToDefId, id, tikzName, position, nodeStmtMatch[2]?.trim(), props);
       continue;
     }
 
@@ -330,8 +341,13 @@ export function parseCircuiTikZ(
     const nodeMatch = body.match(/^\(([-\d.]+)\s*,\s*([-\d.]+)\)\s+node\[([^\]]+)\]\s*\{[^}]*\}$/);
     if (nodeMatch) {
       const position: GridPoint = { x: parseFloat(nodeMatch[1]), y: -parseFloat(nodeMatch[2]) };
-      const tikzName = nodeMatch[3].trim().split(',')[0].trim();
-      addPlacedComponent(doc, registry, tikzToDefId, id, tikzName, position);
+      const opts = splitOptions(nodeMatch[3]);
+      const tikzName = opts[0]?.trim();
+      if (!tikzName) continue;
+      const props: ComponentProps = {
+        options: opts.slice(1).join(', ').trim() || undefined,
+      };
+      addPlacedComponent(doc, registry, tikzToDefId, id, tikzName, position, undefined, props);
       continue;
     }
 
