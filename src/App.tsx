@@ -500,6 +500,8 @@ function LibraryView({
   const [query, setQuery] = useState('');
   const [expandedGroups, setExpandedGroups] = useState<string[]>(['In Use']);
   const [inUseDefIds, setInUseDefIds] = useState<string[]>([]);
+  const [, forceRender] = useState(0);
+  const [staticPreviews, setStaticPreviews] = useState<Record<string, string>>({});
   const defs = useMemo(() => handle?.registry.getAll() ?? [], [handle]);
   const queryLower = query.trim().toLowerCase();
 
@@ -543,6 +545,24 @@ function LibraryView({
     };
   }, [handle]);
 
+  useEffect(() => {
+    if (!handle) return;
+    handle.warmLibraryPreviewProbes(() => forceRender((value) => value + 1));
+  }, [handle]);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch('/library-previews.json')
+      .then((response) => response.ok ? response.json() : {})
+      .then((data) => {
+        if (!cancelled && data && typeof data === 'object') setStaticPreviews(data as Record<string, string>);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   const filtered = queryLower
     ? defs.filter((def) =>
         def.displayName.toLowerCase().includes(queryLower) ||
@@ -585,6 +605,7 @@ function LibraryView({
       def={def}
       handle={handle}
       key={def.id}
+      staticSvg={staticPreviews[def.id] ?? null}
       onActivate={() => {
         onSelectTool(toolForDef(def), def.id);
       }}
@@ -730,18 +751,20 @@ function LibraryItemButton({
   def,
   handle,
   onActivate,
+  staticSvg,
 }: {
   currentDefId?: string;
   def: ComponentDef;
   handle: ImperativeAppHandle | null;
   onActivate: () => void;
+  staticSvg: string | null;
 }) {
   return (
     <Tooltip
       arrow
       enterDelay={1000}
       placement="right"
-      title={<LibraryTooltipContent def={def} handle={handle} />}
+      title={<LibraryTooltipContent def={def} handle={handle} staticSvg={staticSvg} />}
     >
       <Button
         color={currentDefId === def.id ? 'primary' : 'inherit'}
@@ -791,18 +814,20 @@ function LibraryItemButton({
 function LibraryTooltipContent({
   def,
   handle,
+  staticSvg,
 }: {
   def: ComponentDef;
   handle: ImperativeAppHandle | null;
+  staticSvg: string | null;
 }) {
-  const [, forceRender] = useState(0);
-  const probe = useMemo(
-    () => handle?.getLibraryPreviewProbe(def.id, () => forceRender((value) => value + 1)) ?? null,
-    [def.id, handle],
-  );
+  const [renderTick, forceRender] = useState(0);
+  const probe = staticSvg ? null : (handle?.getLibraryPreviewProbe(def.id, () => forceRender((value) => value + 1)) ?? null);
   const previewMarkup = useMemo(
-    () => (probe?.svgMarkup ? namespaceInlineSvg(probe.svgMarkup, `library-${def.id}`) : null),
-    [def.id, probe?.svgMarkup],
+    () => {
+      const svg = staticSvg ?? probe?.svgMarkup ?? null;
+      return svg ? namespaceInlineSvg(svg, `library-${def.id}`) : null;
+    },
+    [def.id, probe?.svgMarkup, renderTick, staticSvg],
   );
 
   return (

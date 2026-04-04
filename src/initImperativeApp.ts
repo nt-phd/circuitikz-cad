@@ -125,6 +125,7 @@ export interface ImperativeAppHandle {
   getFullLatexSource: () => string;
   getRenderedSvg: () => string | null;
   getLibraryPreviewProbe: (defId: string, onResolved: () => void) => ComponentRenderProbe | null;
+  warmLibraryPreviewProbes: (onResolved: () => void) => void;
   getInUseDefIds: () => string[];
   getSelectedComponent: () => ComponentInstance | undefined;
   getSelectedDrawing: () => DrawingInstance | undefined;
@@ -347,9 +348,14 @@ async function createImperativeApp(canvasContainer: HTMLElement): Promise<Impera
           start: { x: 0, y: 0 },
           end: { x: 2, y: 0 },
           props: {},
-        }, onResolved);
+        }, onResolved, true);
       }
-      return componentProbeService.getPlacedGhostProbe(def, 0, onResolved);
+      return componentProbeService.getPlacedGhostProbe(def, 0, onResolved, true);
+    },
+    warmLibraryPreviewProbes: (onResolved) => {
+      for (const def of registry.getAll()) {
+        componentProbeService.primeLibraryProbe(def, onResolved);
+      }
     },
     getInUseDefIds: () => [...new Set(circuitDoc.components.map((comp) => comp.defId))],
     getSelectedComponent: () => {

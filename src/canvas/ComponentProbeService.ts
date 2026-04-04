@@ -19,6 +19,7 @@ interface ProbeRequest {
   displayLatex?: string;
   latex: string;
   markers: ProbeMarkerSpec[];
+  persist?: boolean;
 }
 
 export interface ComponentRenderProbe {
@@ -30,6 +31,40 @@ export interface ComponentRenderProbe {
   svgMarkup: string;
   tx: number;
   ty: number;
+}
+
+const PROBE_STORAGE_PREFIX = 'circuitikz:probe:v1:';
+
+function hashString(input: string): string {
+  let hash = 2166136261;
+  for (let i = 0; i < input.length; i++) {
+    hash ^= input.charCodeAt(i);
+    hash = Math.imul(hash, 16777619);
+  }
+  return (hash >>> 0).toString(16);
+}
+
+function getStorageKey(cacheKey: string): string {
+  return `${PROBE_STORAGE_PREFIX}${hashString(cacheKey)}`;
+}
+
+function readPersistedProbe(cacheKey: string): ComponentRenderProbe | null {
+  try {
+    const raw = window.localStorage.getItem(getStorageKey(cacheKey));
+    if (!raw) return null;
+    return JSON.parse(raw) as ComponentRenderProbe;
+  } catch {
+    return null;
+  }
+}
+
+function writePersistedProbe(cacheKey: string, probe: ComponentRenderProbe | null): void {
+  try {
+    if (!probe) return;
+    window.localStorage.setItem(getStorageKey(cacheKey), JSON.stringify(probe));
+  } catch {
+    // Ignore quota/storage errors.
+  }
 }
 
 export function pickPrimaryPin<T extends { name: string; x: number; y: number }>(pins: T[]): T | null {
@@ -419,24 +454,53 @@ export class ComponentProbeService {
     return this.getOrQueueProbe(request, onResolved);
   }
 
-  getBipoleGhostProbe(def: ComponentDef, comp: BipoleInstance, onResolved: () => void): ComponentRenderProbe | null {
+  getBipoleGhostProbe(def: ComponentDef, comp: BipoleInstance, onResolved: () => void, persist = false): ComponentRenderProbe | null {
     if (!this.getLatexSource) return null;
     const source = this.getLatexSource();
-    return this.getOrQueueProbe(buildBipoleGhostProbe(source, def, comp), onResolved);
+    const request = buildBipoleGhostProbe(source, def, comp);
+    request.persist = persist;
+    return this.getOrQueueProbe(request, onResolved);
   }
 
-  getPlacedGhostProbe(def: ComponentDef, rotation: number, onResolved: () => void): ComponentRenderProbe | null {
+  getPlacedGhostProbe(def: ComponentDef, rotation: number, onResolved: () => void, persist = false): ComponentRenderProbe | null {
     if (!this.getLatexSource) return null;
     const source = this.getLatexSource();
-    return this.getOrQueueProbe(buildPlacedGhostProbe(source, def, rotation), onResolved);
+    const request = buildPlacedGhostProbe(source, def, rotation);
+    request.persist = persist;
+    return this.getOrQueueProbe(request, onResolved);
+  }
+
+  primeLibraryProbe(def: ComponentDef, onResolved: () => void): void {
+    if (!this.getLatexSource) return;
+    const source = this.getLatexSource();
+    const request = def.placementType === 'bipole'
+      ? buildBipoleGhostProbe(source, def, {
+        id: '__library_probe__',
+        defId: def.id,
+        type: 'bipole',
+        start: { x: 0, y: 0 },
+        end: { x: 2, y: 0 },
+        props: {},
+      })
+      : buildPlacedGhostProbe(source, def, 0);
+    request.persist = true;
+    this.getOrQueueProbe(request, onResolved);
   }
 
   private getOrQueueProbe(request: ProbeRequest, onResolved: () => void): ComponentRenderProbe | null {
     if (this.cache.has(request.cacheKey)) return this.cache.get(request.cacheKey) ?? null;
+    if (request.persist) {
+      const persisted = readPersistedProbe(request.cacheKey);
+      if (persisted) {
+        this.cache.set(request.cacheKey, persisted);
+        return persisted;
+      }
+    }
     if (!this.inflight.has(request.cacheKey)) {
       const task = this.fetchProbe(request)
         .then((probe) => {
           this.cache.set(request.cacheKey, probe);
+          if (request.persist) writePersistedProbe(request.cacheKey, probe);
           this.inflight.delete(request.cacheKey);
           onResolved();
           return probe;
