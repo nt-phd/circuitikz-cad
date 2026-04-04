@@ -1,6 +1,9 @@
 import type { GridPoint, Rotation } from '../types';
 import { BaseTool } from './BaseTool';
 import { formatCoord } from '../codegen/CoordFormatter';
+import { componentProbeService, pickPrimaryPin } from '../canvas/ComponentProbeService';
+import { SNAP_GRID } from '../constants';
+import { scaleState } from '../canvas/ScaleState';
 
 export class PlaceMonopoleTool extends BaseTool {
   private rotation: Rotation = 0;
@@ -14,8 +17,25 @@ export class PlaceMonopoleTool extends BaseTool {
       this.ctx.ghost.setGhostElement(null);
       return;
     }
+    const def = this.ctx.getDef(this.defId);
     const tikzName = this.ctx.getDef(this.defId)?.tikzName ?? this.defId;
-    this.ctx.appendLine(`\\draw ${formatCoord(gridPt)} node[${tikzName}] {};`);
+    const nodeName = this.ctx.getDocument().nextNodeName();
+    let placementPt = gridPt;
+    if (def) {
+      const probe = componentProbeService.getPlacedGhostProbe(def, this.rotation, () => {});
+      const primaryPin = probe ? pickPrimaryPin(probe.pinOffsets) : null;
+      if (primaryPin) {
+        placementPt = {
+          x: gridPt.x - primaryPin.x / scaleState.effectiveGridSize,
+          y: gridPt.y - primaryPin.y / scaleState.effectiveGridSize,
+        };
+        placementPt = {
+          x: Math.round(placementPt.x / SNAP_GRID) * SNAP_GRID,
+          y: Math.round(placementPt.y / SNAP_GRID) * SNAP_GRID,
+        };
+      }
+    }
+    this.ctx.appendLine(`\\node[${tikzName}](${nodeName}) at ${formatCoord(placementPt)} {};`);
   }
 
   onMouseMove(gridPt: GridPoint, _e: MouseEvent): void {

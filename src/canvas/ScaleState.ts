@@ -12,12 +12,30 @@
  */
 
 import { GRID_SIZE } from '../constants';
+import type { ComponentDef, ScaleFamily } from '../types';
 
 export const scaleState = {
   tikzScale: 1.0,
+  componentScales: {
+    resistors: 1.0,
+    capacitors: 1.0,
+    inductors: 1.0,
+    sources: 1.0,
+    amplifiers: 1.0,
+    nodes: 1.0,
+    misc: 1.0,
+  } as Record<ScaleFamily, number>,
 
   get effectiveGridSize(): number {
     return GRID_SIZE * this.tikzScale;
+  },
+
+  getFamilyScale(scaleFamily: ScaleFamily): number {
+    return this.componentScales[scaleFamily] ?? 1.0;
+  },
+
+  getComponentScale(def: ComponentDef): number {
+    return this.getFamilyScale(def.scaleFamily ?? 'misc');
   },
 };
 
@@ -31,4 +49,29 @@ export function extractTikzScale(body: string): number {
   if (!m) return 1.0;
   const scaleMatch = m[1].match(/\bscale\s*=\s*([\d.]+)/);
   return scaleMatch ? parseFloat(scaleMatch[1]) : 1.0;
+}
+
+export function extractCtikzScales(source: string): Record<ScaleFamily, number> {
+  const next = {
+    resistors: 1.0,
+    capacitors: 1.0,
+    inductors: 1.0,
+    sources: 1.0,
+    amplifiers: 1.0,
+    nodes: 1.0,
+    misc: 1.0,
+  } satisfies Record<ScaleFamily, number>;
+
+  const ctikzRe = /\\ctikzset\s*\{([^}]*)\}/g;
+  let blockMatch: RegExpExecArray | null;
+  while ((blockMatch = ctikzRe.exec(source))) {
+    const block = blockMatch[1];
+    const scaleRe = /([a-zA-Z][a-zA-Z-]*)\s*\/\s*scale\s*=\s*([0-9]*\.?[0-9]+)/g;
+    let scaleMatch: RegExpExecArray | null;
+    while ((scaleMatch = scaleRe.exec(block))) {
+      const family = scaleMatch[1].toLowerCase() as ScaleFamily;
+      if (family in next) next[family] = parseFloat(scaleMatch[2]);
+    }
+  }
+  return next;
 }

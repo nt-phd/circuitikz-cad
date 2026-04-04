@@ -12,9 +12,10 @@
  *   \draw (x,y) -- (x2,y2) -- ...;               → WireInstance
  */
 
-import type { GridPoint, BipoleInstance, MonopoleInstance, NodeInstance, WireInstance, ComponentProps, TerminalMark } from '../types';
+import type { ConnectionRef, GridPoint, BipoleInstance, MonopoleInstance, NodeInstance, WireInstance, ComponentProps, TerminalMark } from '../types';
 import type { CircuitDocument } from '../model/CircuitDocument';
 import type { ComponentRegistry } from '../definitions/ComponentRegistry';
+import { getComponentAnchorPoints } from '../canvas/ConnectionAnchors';
 
 // ─── helpers ───────────────────────────────────────────────────────────────
 
@@ -22,6 +23,88 @@ function parseCoord(s: string): GridPoint | null {
   const m = s.match(/\(\s*([-\d.]+)\s*,\s*([-\d.]+)\s*\)/);
   if (!m) return null;
   return { x: parseFloat(m[1]), y: -parseFloat(m[2]) };
+}
+
+function parseReference(s: string): { nodeName: string; anchor: string } | null {
+  const m = s.match(/\(\s*([A-Za-z][\w]*)\.([^)]+)\s*\)/);
+  if (!m) return null;
+  return { nodeName: m[1], anchor: m[2].trim() };
+}
+
+function resolveEndpoint(
+  token: string,
+  doc: CircuitDocument,
+  registry: ComponentRegistry,
+): { point: GridPoint; ref?: ConnectionRef } | null {
+  const coord = parseCoord(token);
+  if (coord) return { point: coord };
+  const ref = parseReference(token);
+  if (!ref) return null;
+  const comp = doc.getComponentByNodeName(ref.nodeName);
+  if (!comp) return null;
+  const def = registry.get(comp.defId);
+  if (!def) return null;
+  const match = getComponentAnchorPoints(comp, def).find((anchor) => anchor.ref?.anchor === ref.anchor);
+  if (!match) return null;
+  return {
+    point: match.point,
+    ref: {
+      componentId: comp.id,
+      nodeName: ref.nodeName,
+      anchor: ref.anchor,
+    },
+  };
+}
+
+function expandWirePath(points: Array<{ point: GridPoint; ref?: ConnectionRef }>, operators: Array<'--' | '|-' | '-|'>): {
+  endRef?: ConnectionRef;
+  points: GridPoint[];
+  startRef?: ConnectionRef;
+} {
+  const expanded: GridPoint[] = [points[0].point];
+  for (let i = 0; i < operators.length; i++) {
+    const a = points[i].point;
+    const b = points[i + 1].point;
+    const op = operators[i];
+    if (op === '--') {
+      expanded.push(b);
+      continue;
+    }
+    if (op === '|-') {
+      expanded.push({ x: a.x, y: b.y });
+      expanded.push(b);
+      continue;
+    }
+    expanded.push({ x: b.x, y: a.y });
+    expanded.push(b);
+  }
+  return {
+    points: expanded,
+    startRef: points[0].ref,
+    endRef: points[points.length - 1].ref,
+  };
+}
+
+function parseWireStatement(
+  body: string,
+  doc: CircuitDocument,
+  registry: ComponentRegistry,
+): { endRef?: ConnectionRef; operators?: Array<'--' | '|-' | '-|'>; pathPoints?: GridPoint[]; points: GridPoint[]; startRef?: ConnectionRef } | null {
+  const operators = [...body.matchAll(/(--|\|-|-\|)/g)].map((match) => match[1] as '--' | '|-' | '-|');
+  if (operators.length === 0) return null;
+  const tokens = body.split(/\s*(?:--|\|-|-\|)\s*/).map((token) => token.trim()).filter(Boolean);
+  if (tokens.length !== operators.length + 1) return null;
+  const resolved = tokens.map((token) => resolveEndpoint(token, doc, registry));
+  if (resolved.some((token) => !token)) return null;
+  const endpoints = resolved as Array<{ point: GridPoint; ref?: ConnectionRef }>;
+  const expanded = expandWirePath(endpoints, operators);
+  return {
+    points: expanded.points,
+    pathPoints: endpoints.map((endpoint) => endpoint.point),
+    startRef: expanded.startRef,
+    endRef: expanded.endRef,
+    operators,
+  };
 }
 
 function parseTerminals(opts: string[]): { startTerminal?: TerminalMark; endTerminal?: TerminalMark } {
@@ -66,17 +149,18 @@ function addPlacedComponent(
   id: string,
   tikzName: string,
   position: GridPoint,
+  nodeName?: string,
 ): void {
   const defId = tikzToDefId.get(tikzName) ?? tikzName;
   const def = registry.get(defId);
   if (def?.placementType === 'node') {
     const comp: NodeInstance = {
-      id, defId, type: 'node', position, rotation: 0, mirror: 'none', props: {},
+      id, defId, type: 'node', nodeName, position, rotation: 0, mirror: 'none', props: {},
     };
     doc.addComponent(comp);
     return;
   }
-  const comp: MonopoleInstance = { id, defId, type: 'monopole', position, rotation: 0, props: {} };
+  const comp: MonopoleInstance = { id, defId, type: 'monopole', nodeName, position, rotation: 0, props: {} };
   doc.addComponent(comp);
 }
 
@@ -131,11 +215,11 @@ export function parseCircuiTikZ(
     // Stable ID = 'line:<lineIndex>'
     const id = `line:${lineIndex}`;
 
-    const nodeStmtMatch = stmt.match(/^\\node\s*\[([^\]]+)\](?:\([^)]+\))?\s+at\s+(\([^)]+\))\s*\{[\s\S]*?\}(?:\s+.*)?$/);
+    const nodeStmtMatch = stmt.match(/^\\node\s*\[([^\]]+)\](?:\(([^)]+)\))?\s+at\s+(\([^)]+\))\s*\{[\s\S]*?\}(?:\s+.*)?$/);
     if (nodeStmtMatch) {
-      const position = parseCoord(nodeStmtMatch[2]);
+      const position = parseCoord(nodeStmtMatch[3]);
       const tikzName = splitOptions(nodeStmtMatch[1])[0]?.trim();
-      if (position && tikzName) addPlacedComponent(doc, registry, tikzToDefId, id, tikzName, position);
+      if (position && tikzName) addPlacedComponent(doc, registry, tikzToDefId, id, tikzName, position, nodeStmtMatch[2]?.trim());
       continue;
     }
 
@@ -144,10 +228,18 @@ export function parseCircuiTikZ(
     const body = drawMatch[1].trim();
 
     // Wire: coords joined by --
-    if (/^\(.*\)(\s*--\s*\(.*\))+$/.test(body)) {
-      const points: GridPoint[] = body.split('--').map(s => parseCoord(s.trim())).filter(Boolean) as GridPoint[];
-      if (points.length >= 2) {
-        const wire: WireInstance = { id, points, junctions: new Map() };
+    const wirePath = parseWireStatement(body, doc, registry);
+    if (wirePath) {
+      if (wirePath.points.length >= 2) {
+        const wire: WireInstance = {
+          id,
+          points: wirePath.points,
+          pathPoints: wirePath.pathPoints,
+          startRef: wirePath.startRef,
+          endRef: wirePath.endRef,
+          operators: wirePath.operators,
+          junctions: new Map(),
+        };
         doc.addWire(wire);
       }
       continue;

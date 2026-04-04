@@ -7,6 +7,12 @@ export interface GridPoint {
   y: number;
 }
 
+export interface ConnectionRef {
+  anchor: string;
+  componentId: string;
+  nodeName: string;
+}
+
 export interface ScreenPoint {
   x: number;
   y: number;
@@ -20,6 +26,7 @@ export type Mirror = 'none' | 'horizontal' | 'vertical';
 // ============================================================
 
 export type PlacementType = 'bipole' | 'node' | 'monopole';
+export type ScaleFamily = 'resistors' | 'capacitors' | 'inductors' | 'sources' | 'amplifiers' | 'nodes' | 'misc';
 
 export interface SymbolPin {
   name: string;
@@ -49,11 +56,16 @@ export interface ComponentDef {
   symbolRefX: number;
   symbolRefY: number;
   symbolPins?: SymbolPin[];
+  shapeBBoxX?: number;
+  shapeBBoxY?: number;
+  shapeBBoxW?: number;
+  shapeBBoxH?: number;
   /** viewBox of the symbol */
   viewBox: string;
   viewBoxW: number;
   viewBoxH: number;
   defaultProps: ComponentProps;
+  scaleFamily?: ScaleFamily;
   shortcut?: string;
   /** Original group from symbols.svg, e.g. "Resistive bipoles" */
   group?: string;
@@ -87,6 +99,7 @@ export interface NodeInstance {
   id: string;
   defId: string;
   type: 'node';
+  nodeName?: string;
   position: GridPoint;
   rotation: Rotation;
   mirror: Mirror;
@@ -97,6 +110,7 @@ export interface MonopoleInstance {
   id: string;
   defId: string;
   type: 'monopole';
+  nodeName?: string;
   position: GridPoint;
   rotation: Rotation;
   props: ComponentProps;
@@ -109,8 +123,12 @@ export type ComponentInstance = BipoleInstance | NodeInstance | MonopoleInstance
 // ============================================================
 
 export interface WireInstance {
+  endRef?: ConnectionRef;
   id: string;
+  operators?: Array<'--' | '|-' | '-|'>;
+  pathPoints?: GridPoint[];
   points: GridPoint[];
+  startRef?: ConnectionRef;
   junctions: Map<number, TerminalMark>;
 }
 

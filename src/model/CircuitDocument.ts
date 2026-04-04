@@ -27,6 +27,21 @@ export class CircuitDocument {
     return this.components.find(c => c.id === id);
   }
 
+  getComponentByNodeName(nodeName: string): ComponentInstance | undefined {
+    return this.components.find((c) => c.type !== 'bipole' && c.nodeName === nodeName);
+  }
+
+  nextNodeName(prefix = 'N'): string {
+    let max = 0;
+    for (const comp of this.components) {
+      if (comp.type === 'bipole' || !comp.nodeName) continue;
+      const m = comp.nodeName.match(new RegExp(`^${prefix}(\\d+)$`));
+      if (!m) continue;
+      max = Math.max(max, Number.parseInt(m[1], 10));
+    }
+    return `${prefix}${max + 1}`;
+  }
+
   addWire(w: WireInstance): void {
     this.wires.push(w);
   }

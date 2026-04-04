@@ -5,7 +5,7 @@ import { scaleState } from './ScaleState';
 export class ViewTransform {
   private _panX = 0;
   private _panY = 0;
-  private _zoom = 1.0;
+  private _zoom = 2.0;
 
   get panX(): number { return this._panX; }
   get panY(): number { return this._panY; }

@@ -93,6 +93,12 @@ export class ToolManager {
         target?.isContentEditable
       ) return;
 
+      if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.key.toLowerCase() === 'z') {
+        e.preventDefault();
+        this.ctx.undo();
+        return;
+      }
+
       if (e.key === 'Delete' || e.key === 'Backspace') {
         const selectedIds = this.selection.getSelectedIds();
         if (selectedIds.length > 0) {

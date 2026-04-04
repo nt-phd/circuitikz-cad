@@ -9,9 +9,11 @@ import { registry } from './definitions/ComponentRegistry';
 import { LatexCanvas } from './canvas/LatexCanvas';
 import { ToolManager } from './tools/ToolManager';
 import { parseCircuiTikZ, lineIndexFromId } from './codegen/CircuiTikZParser';
-import { extractTikzScale, scaleState } from './canvas/ScaleState';
+import { extractCtikzScales, extractTikzScale, scaleState } from './canvas/ScaleState';
+import { componentProbeService } from './canvas/ComponentProbeService';
 import { formatCoord } from './codegen/CoordFormatter';
 import { formatLabel } from './codegen/LabelFormatter';
+import { emitWirePath } from './codegen/WirePathEmitter';
 import { DEFAULT_BODY } from './model/LatexDocument';
 import type { ComponentInstance, WireInstance, TerminalMark, ToolType, Rotation, ComponentProps } from './types';
 import type { ToolContext } from './tools/BaseTool';
@@ -45,16 +47,19 @@ function emitComponentLine(comp: ComponentInstance): string | null {
     return `\\draw ${formatCoord(comp.start)} to[${opts.join(', ')}] ${formatCoord(comp.end)};`;
   }
   if (comp.type === 'monopole') {
-    return `\\draw ${formatCoord(comp.position)} node[${tikzName}] {};`;
+    const nodeName = comp.nodeName ? `(${comp.nodeName})` : '';
+    return `\\node[${tikzName}]${nodeName} at ${formatCoord(comp.position)} {};`;
   }
   if (comp.type === 'node') {
-    return `\\node[${tikzName}] at ${formatCoord(comp.position)} {};`;
+    const nodeName = comp.nodeName ? `(${comp.nodeName})` : '';
+    return `\\node[${tikzName}]${nodeName} at ${formatCoord(comp.position)} {};`;
   }
   return null;
 }
 
 function emitWireLine(wire: WireInstance): string {
-  return `\\draw ${wire.points.map(formatCoord).join(' -- ')};`;
+  if (wire.points.length < 2) return '\\draw ;';
+  return `\\draw ${emitWirePath(wire)};`;
 }
 
 function updateBodyLinePreservingStructure(body: string, lineIndex: number, replacement: string, kind: 'component' | 'wire'): string {
@@ -93,6 +98,7 @@ export interface ImperativeAppHandle {
   getPreamble: () => string;
   getBody: () => string;
   getFullLatexSource: () => string;
+  getRenderedSvg: () => string | null;
   getSelectedComponent: () => ComponentInstance | undefined;
   getSelectedWire: () => WireInstance | undefined;
   setTool: (tool: ToolType, defId?: string) => void;
@@ -124,12 +130,32 @@ async function createImperativeApp(canvasContainer: HTMLElement): Promise<Impera
   const circuitDoc = new CircuitDocument('european');
   const selection = new SelectionState();
   const eventBus = new EventBus();
+  const undoStack: string[] = [];
 
   const canvas = new LatexCanvas(canvasContainer, latexDoc, circuitDoc, registry, selection);
+  componentProbeService.configure(() => ({ body: latexDoc.body, preamble: latexDoc.preamble }));
 
   const syncTikzScale = () => {
     scaleState.tikzScale = extractTikzScale(latexDoc.body);
+    scaleState.componentScales = extractCtikzScales(`${latexDoc.preamble}\n${latexDoc.body}`);
     canvas.updateGridScale();
+  };
+
+  const applyFullSource = (source: string) => {
+    latexDoc.loadFromSource(source);
+    syncTikzScale();
+    componentProbeService.invalidate();
+    parseCircuiTikZ(latexDoc.body, circuitDoc, registry);
+    selection.clear();
+    eventBus.emit({ type: 'selection-changed', selectedIds: [], source: 'programmatic' });
+    eventBus.emit({ type: 'body-changed' });
+    canvas.refresh();
+    canvas.scheduleRender();
+  };
+
+  const pushUndoSnapshot = () => {
+    const current = latexDoc.toFullSource();
+    if (undoStack[undoStack.length - 1] !== current) undoStack.push(current);
   };
 
   syncTikzScale();
@@ -141,8 +167,10 @@ async function createImperativeApp(canvasContainer: HTMLElement): Promise<Impera
     getDocument: () => circuitDoc,
     getDef: (defId: string) => registry.get(defId),
     appendLine: (line: string) => {
+      pushUndoSnapshot();
       latexDoc.body = appendLineToBody(latexDoc.body, line);
       syncTikzScale();
+      componentProbeService.invalidate();
       parseCircuiTikZ(latexDoc.body, circuitDoc, registry);
       eventBus.emit({ type: 'body-changed' });
       canvas.refresh();
@@ -150,6 +178,7 @@ async function createImperativeApp(canvasContainer: HTMLElement): Promise<Impera
     },
     deleteElements: (ids: string[]) => {
       if (ids.length === 0) return;
+      pushUndoSnapshot();
       const lineIndices = ids.map(lineIndexFromId).filter((idx) => idx >= 0);
       for (const id of ids) {
         circuitDoc.removeComponent(id);
@@ -157,12 +186,18 @@ async function createImperativeApp(canvasContainer: HTMLElement): Promise<Impera
       }
       latexDoc.body = removeBodyLines(latexDoc.body, lineIndices);
       syncTikzScale();
+      componentProbeService.invalidate();
       parseCircuiTikZ(latexDoc.body, circuitDoc, registry);
       selection.clear();
       eventBus.emit({ type: 'selection-changed', selectedIds: [], source: 'canvas' });
       eventBus.emit({ type: 'body-changed' });
       canvas.refresh();
       canvas.scheduleRender();
+    },
+    undo: () => {
+      const previous = undoStack.pop();
+      if (!previous) return;
+      applyFullSource(previous);
     },
   };
 
@@ -182,6 +217,7 @@ async function createImperativeApp(canvasContainer: HTMLElement): Promise<Impera
   });
 
   eventBus.on('document-changed', () => {
+    pushUndoSnapshot();
     let nextBody = latexDoc.body;
     for (const id of selection.getSelectedIds()) {
       const lineIdx = lineIndexFromId(id);
@@ -197,6 +233,7 @@ async function createImperativeApp(canvasContainer: HTMLElement): Promise<Impera
     }
     latexDoc.body = nextBody;
     syncTikzScale();
+    componentProbeService.invalidate();
     eventBus.emit({ type: 'body-changed' });
     canvas.refresh();
     canvas.scheduleRender();
@@ -204,6 +241,7 @@ async function createImperativeApp(canvasContainer: HTMLElement): Promise<Impera
 
   eventBus.on('user-edited-latex', () => {
     syncTikzScale();
+    componentProbeService.invalidate();
     parseCircuiTikZ(latexDoc.body, circuitDoc, registry);
     selection.clear();
     canvas.refresh();
@@ -236,6 +274,7 @@ async function createImperativeApp(canvasContainer: HTMLElement): Promise<Impera
     getPreamble: () => latexDoc.preamble,
     getBody: () => latexDoc.body,
     getFullLatexSource: () => latexDoc.toFullSource(),
+    getRenderedSvg: () => canvas.getRenderedSvg(),
     getSelectedComponent: () => {
       const [id] = selection.getSelectedIds();
       return id ? circuitDoc.getComponent(id) : undefined;
@@ -253,9 +292,11 @@ async function createImperativeApp(canvasContainer: HTMLElement): Promise<Impera
     },
     setPreamble: (preamble) => {
       latexDoc.preamble = preamble;
+      componentProbeService.invalidate();
     },
     setBody: (body) => {
       latexDoc.body = body;
+      componentProbeService.invalidate();
     },
     updateComponentProps: (id, props) => {
       const comp = circuitDoc.getComponent(id);
@@ -270,9 +311,11 @@ async function createImperativeApp(canvasContainer: HTMLElement): Promise<Impera
       }
     },
     commitLatexEdits: () => {
+      pushUndoSnapshot();
       eventBus.emit({ type: 'user-edited-latex' });
     },
     commitDocumentChange: () => {
+      pushUndoSnapshot();
       eventBus.emit({ type: 'document-changed' });
     },
     onToolChange: (fn) => eventBus.on('tool-changed', (event) => {
@@ -291,6 +334,7 @@ async function createImperativeApp(canvasContainer: HTMLElement): Promise<Impera
       fn(event.gridPt, event.zoomPercent);
     }),
     clearDocument: () => {
+      pushUndoSnapshot();
       circuitDoc.clear();
       latexDoc.body = DEFAULT_BODY;
       eventBus.emit({ type: 'body-changed' });

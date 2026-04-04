@@ -175,6 +175,11 @@ export class LatexCanvas {
     return this.isPanning || this.spaceHeld;
   }
 
+  getRenderedSvg(): string | null {
+    const svgEl = this.latexDiv.querySelector('svg');
+    return svgEl ? svgEl.outerHTML : null;
+  }
+
   // ====== LATEX RENDER ======
 
   private async doRender(): Promise<void> {
@@ -270,7 +275,7 @@ export class LatexCanvas {
     this.minorDot = createSvgElement('circle', {
       cx: gs / 2,
       cy: gs / 2,
-      r: 2,
+      r: 1,
       fill: GRID_COLOR_MINOR,
     }) as SVGCircleElement;
     this.patternMinor.appendChild(this.minorDot);
@@ -287,7 +292,7 @@ export class LatexCanvas {
     this.majorDot = createSvgElement('circle', {
       cx: majorSize / 2,
       cy: majorSize / 2,
-      r: 3.5,
+      r: 1.75,
       fill: GRID_COLOR_MAJOR,
     }) as SVGCircleElement;
     this.patternMajor.appendChild(this.majorDot);
@@ -324,8 +329,8 @@ export class LatexCanvas {
   }
 
   private updateGridDotScale(): void {
-    const minorRadius = 2 / this.view.zoom;
-    const majorRadius = 3.5 / this.view.zoom;
+    const minorRadius = 1 / this.view.zoom;
+    const majorRadius = 1.75 / this.view.zoom;
     this.minorDot?.setAttribute('r', String(minorRadius));
     this.majorDot?.setAttribute('r', String(majorRadius));
   }

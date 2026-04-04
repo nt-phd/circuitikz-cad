@@ -7,15 +7,15 @@ import type { GridPoint, BipoleInstance, ComponentInstance, ComponentDef, WireIn
 import type { ComponentRegistry } from '../definitions/ComponentRegistry';
 import type { SelectionState } from '../model/SelectionState';
 import type { CircuitDocument } from '../model/CircuitDocument';
-import { SELECTION_COLOR, GHOST_OPACITY } from '../constants';
+import { SELECTION_COLOR, GHOST_OPACITY, TIKZ_PT_PER_UNIT, GRID_SIZE } from '../constants';
 import { scaleState } from './ScaleState';
 import { createGroup, createLine, createRect } from '../utils/svg';
+import { getBipoleBodyMetrics, getPlacedComponentMetrics } from './ComponentGeometry';
+import { componentProbeService, pickPrimaryPin, type ComponentRenderProbe } from './ComponentProbeService';
 
 const OVERLAY_STROKE_WIDTH = 0.5;
 const SELECTION_LINE_OPACITY = 1;
 const GHOST_LINE_OPACITY = 0.8;
-const OVERLAY_BOX_OPACITY = 0.22;
-const GHOST_BOX_OPACITY = 0.18;
 const OVERLAY_CROSS_SIZE = 0.15;
 
 export class GhostRenderer {
@@ -46,30 +46,59 @@ export class GhostRenderer {
     }
   }
 
+  buildMarqueeGhost(start: GridPoint, end: GridPoint): SVGGElement {
+    const gs = this.gs;
+    const x1 = start.x * gs;
+    const y1 = start.y * gs;
+    const x2 = end.x * gs;
+    const y2 = end.y * gs;
+    const left = Math.min(x1, x2);
+    const top = Math.min(y1, y2);
+    const width = Math.abs(x2 - x1);
+    const height = Math.abs(y2 - y1);
+    const g = createGroup('ghost-marquee');
+    g.appendChild(createRect(left, top, width, height, {
+      fill: SELECTION_COLOR,
+      opacity: 0.12,
+      stroke: SELECTION_COLOR,
+      'stroke-width': OVERLAY_STROKE_WIDTH,
+      'stroke-dasharray': '4 3',
+      'vector-effect': 'non-scaling-stroke',
+    }));
+    return g;
+  }
+
   buildBipoleGhost(defId: string, start: GridPoint, end: GridPoint): SVGGElement | null {
     const gs = this.gs;
     const sx = start.x * gs, sy = start.y * gs;
     const ex = end.x   * gs, ey = end.y   * gs;
     const def = this.registry.get(defId);
     const g = createGroup('ghost-bipole');
+    const dx = ex - sx;
+    const dy = ey - sy;
+    const dist = Math.hypot(dx, dy);
+    const angleDeg = Math.atan2(dy, dx) * 180 / Math.PI;
     if (def) {
-      const dx = ex - sx;
-      const dy = ey - sy;
-      const dist = Math.hypot(dx, dy);
-      const angleDeg = Math.atan2(dy, dx) * 180 / Math.PI;
-      const bodyPx = 2 * gs;
-      const scale = bodyPx / def.symbolPinSpan;
-      const bodyWidth = def.viewBoxW * scale;
-      const bodyHeight = Math.min(def.viewBoxH * scale, gs * 1.2);
-      const bodyX = dist / 2 - bodyWidth / 2;
-      const bodyY = -bodyHeight / 2;
-      const body = createGroup('ghost-bipole-body');
-      body.setAttribute('transform', `translate(${sx}, ${sy}) rotate(${angleDeg})`);
-      body.appendChild(createRect(bodyX, bodyY, bodyWidth, bodyHeight, {
-        fill: SELECTION_COLOR,
-        opacity: GHOST_BOX_OPACITY,
-      }));
-      g.appendChild(body);
+      const ghostComp: BipoleInstance = {
+        id: '__ghost__',
+        defId,
+        type: 'bipole',
+        start,
+        end,
+        props: {},
+      };
+      const probe = componentProbeService.getBipoleGhostProbe(def, ghostComp, () => this.setGhostElement(this.buildBipoleGhost(defId, start, end)));
+      if (probe) this.appendProbeSvg(g, sx, sy, probe, GHOST_OPACITY, angleDeg);
+      if (!probe) {
+        const { bodyWidth, bodyHeight, bodyX, bodyY } = getBipoleBodyMetrics(def, gs, dist);
+        const body = createGroup('ghost-bipole-body');
+        body.setAttribute('transform', `translate(${sx}, ${sy}) rotate(${angleDeg})`);
+        body.appendChild(createRect(bodyX, bodyY, bodyWidth, bodyHeight, {
+          fill: SELECTION_COLOR,
+          opacity: 0.12,
+        }));
+        g.appendChild(body);
+      }
     }
     g.appendChild(this.createOverlayLine(sx, sy, ex, ey, {
       'stroke-dasharray': '4 3',
@@ -124,7 +153,7 @@ export class GhostRenderer {
       this.selectionGroup.appendChild(this.buildBipoleSelection(comp, def));
       return;
     }
-    this.selectionGroup.appendChild(this.buildPlacedComponentSelection(comp.position.x, comp.position.y, def, comp.rotation));
+    this.selectionGroup.appendChild(this.buildPlacedComponentSelection(comp.position.x, comp.position.y, def, comp.rotation, false, comp.id));
   }
 
   private buildWireSelection(wire: WireInstance): SVGGElement {
@@ -151,22 +180,16 @@ export class GhostRenderer {
     const dy = ey - sy;
     const dist = Math.hypot(dx, dy);
     const angleDeg = Math.atan2(dy, dx) * 180 / Math.PI;
+    const probe = componentProbeService.getSelectionProbe(comp.id, comp, def, () => this.renderSelection());
+    if (probe) return this.buildProbeSelectionGroup(sx, sy, probe, false, angleDeg);
 
     const g = createGroup('sel-bipole');
     g.setAttribute('transform', `translate(${sx}, ${sy}) rotate(${angleDeg})`);
-    const bodyPx = 2 * gs;
-    const scale = bodyPx / def.symbolPinSpan;
-    const bodyWidth = def.viewBoxW * scale;
-    const bodyHeight = Math.min(def.viewBoxH * scale, gs * 1.2);
-    const bodyX = dist / 2 - bodyWidth / 2;
-    const bodyY = -bodyHeight / 2;
-    g.appendChild(createRect(bodyX, bodyY, bodyWidth, bodyHeight, {
-      fill: SELECTION_COLOR,
-      opacity: OVERLAY_BOX_OPACITY,
-    }));
+    const { bodyWidth, bodyHeight, bodyX, bodyY, pinScale } = getBipoleBodyMetrics(def, gs, dist);
     for (const pin of def.symbolPins ?? []) {
-      const localX = dist / 2 + pin.x * scale;
-      const localY = pin.y * scale;
+      const pinAbsX = def.symbolRefX + pin.x;
+      const localX = bodyX + (pinAbsX - (def.shapeBBoxX ?? 0)) * pinScale;
+      const localY = pin.y * pinScale;
       g.appendChild(this.crossAt(localX, localY, gs * OVERLAY_CROSS_SIZE));
     }
     return g;
@@ -178,27 +201,43 @@ export class GhostRenderer {
     def: ComponentDef,
     rotation: number,
     ghost = false,
+    selectionId?: string,
   ): SVGGElement {
     const gs = this.gs;
     const cx = x * gs;
     const cy = y * gs;
-    const baseScale = def.placementType === 'node'
-      ? (gs * 3) / def.viewBoxW
-      : (gs * 1.5) / def.viewBoxH;
-    const width = def.viewBoxW * baseScale;
-    const height = def.viewBoxH * baseScale;
-    const left = cx - def.symbolRefX * baseScale;
-    const top = cy - def.symbolRefY * baseScale;
-    const g = createGroup('sel-point');
-    g.appendChild(createRect(left, top, width, height, {
-      fill: SELECTION_COLOR,
-      opacity: ghost ? GHOST_BOX_OPACITY : OVERLAY_BOX_OPACITY,
-    }));
+    const selectedComp = selectionId ? this.doc.getComponent(selectionId) : undefined;
+    const probe = ghost
+      ? componentProbeService.getPlacedGhostProbe(def, rotation, () => this.setGhostElement(this.buildMonopoleGhost(def.id, { x, y }, rotation)))
+      : selectionId && selectedComp
+        ? componentProbeService.getSelectionProbe(selectionId, selectedComp, def, () => this.renderSelection())
+        : null;
+    if (probe) {
+      const primaryPin = ghost ? this.getPrimaryProbePin(probe) : null;
+      const anchorX = ghost && primaryPin ? cx - primaryPin.x : cx;
+      const anchorY = ghost && primaryPin ? cy - primaryPin.y : cy;
+      const g = this.buildProbeSelectionGroup(anchorX, anchorY, probe, ghost);
+      if (ghost) this.appendProbeSvg(g, anchorX, anchorY, probe, GHOST_OPACITY);
+      return g;
+    }
+    const { width, height, leftOffset, topOffset, scale } = getPlacedComponentMetrics(def, gs);
     const pins = (def.symbolPins && def.symbolPins.length > 0)
       ? def.symbolPins
       : [{ name: 'reference', x: 0, y: 0 }];
+    const primaryFallbackPin = ghost ? pins[0] : null;
+    const anchorX = ghost && primaryFallbackPin ? cx - primaryFallbackPin.x * scale : cx;
+    const anchorY = ghost && primaryFallbackPin ? cy - primaryFallbackPin.y * scale : cy;
+    const left = anchorX + leftOffset;
+    const top = anchorY + topOffset;
+    const g = createGroup('sel-point');
+    if (ghost) {
+      g.appendChild(createRect(left, top, width, height, {
+        fill: SELECTION_COLOR,
+        opacity: 0.12,
+      }));
+    }
     for (const pin of pins) {
-      const projected = this.projectPlacedPin(cx, cy, pin.x * baseScale, pin.y * baseScale, rotation);
+      const projected = this.projectPlacedPin(anchorX, anchorY, pin.x * scale, pin.y * scale, rotation);
       g.appendChild(this.crossAt(
         projected.x,
         projected.y,
@@ -207,6 +246,47 @@ export class GhostRenderer {
       ));
     }
     return g;
+  }
+
+  private getPrimaryProbePin(probe: ComponentRenderProbe): { name: string; x: number; y: number } | null {
+    return pickPrimaryPin(probe.pinOffsets);
+  }
+
+  private buildProbeSelectionGroup(
+    anchorX: number,
+    anchorY: number,
+    probe: ComponentRenderProbe,
+    ghost = false,
+    rotationDeg = 0,
+  ): SVGGElement {
+    const gs = this.gs;
+    const g = createGroup('sel-probe');
+    g.setAttribute('transform', `translate(${anchorX}, ${anchorY}) rotate(${rotationDeg})`);
+    for (const pin of probe.pinOffsets) {
+      g.appendChild(this.crossAt(
+        pin.x,
+        pin.y,
+        gs * OVERLAY_CROSS_SIZE,
+        ghost ? GHOST_LINE_OPACITY : SELECTION_LINE_OPACITY,
+      ));
+    }
+    return g;
+  }
+
+  private appendProbeSvg(
+    parent: SVGGElement,
+    anchorX: number,
+    anchorY: number,
+    probe: ComponentRenderProbe,
+    opacity: number,
+    rotationDeg = 0,
+  ): void {
+    const g = createGroup('probe-svg');
+    const ptToPx = GRID_SIZE / TIKZ_PT_PER_UNIT;
+    g.setAttribute('transform', `translate(${anchorX}, ${anchorY}) rotate(${rotationDeg}) translate(${-probe.tx * ptToPx}, ${-probe.ty * ptToPx}) scale(${ptToPx})`);
+    g.setAttribute('opacity', String(opacity));
+    g.innerHTML = probe.svgMarkup;
+    parent.appendChild(g);
   }
 
   private projectPlacedPin(

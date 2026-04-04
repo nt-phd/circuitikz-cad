@@ -13,6 +13,7 @@ export interface ToolContext {
   appendLine: (line: string) => void;
   /** Delete model elements and their corresponding LaTeX source lines. */
   deleteElements: (ids: string[]) => void;
+  undo: () => void;
 }
 
 export abstract class BaseTool {

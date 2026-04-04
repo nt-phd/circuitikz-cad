@@ -27,6 +27,11 @@ export interface VariantDef {
   refY: number;
   /** Named pins with coordinates relative to refX/refY */
   pins: PinDef[];
+  /** Real rendered geometry bounds inside the symbol coordinate system */
+  bboxX: number;
+  bboxY: number;
+  bboxWidth: number;
+  bboxHeight: number;
 }
 
 export interface ComponentEntry {
@@ -78,6 +83,21 @@ export class SymbolsDB {
     document.body.appendChild(hiddenSvg);
     this.svgDefsContainer = hiddenSvg;
 
+    const measureSymbolBounds = (symbolId: string) => {
+      const measureSvg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+      measureSvg.setAttribute('style', 'position:absolute;width:0;height:0;overflow:hidden;pointer-events:none');
+      const useEl = document.createElementNS('http://www.w3.org/2000/svg', 'use');
+      useEl.setAttribute('href', `#${symbolId}`);
+      measureSvg.appendChild(useEl);
+      document.body.appendChild(measureSvg);
+      try {
+        const bbox = useEl.getBBox();
+        return { x: bbox.x, y: bbox.y, width: bbox.width, height: bbox.height };
+      } finally {
+        measureSvg.remove();
+      }
+    };
+
     // Parse <metadata> for component definitions
     const metadata = doc.querySelector('metadata');
     if (!metadata) throw new Error('symbols.svg: no <metadata>');
@@ -110,7 +130,20 @@ export class SymbolsDB {
           });
         }
 
-        variants.push({ symbolId, viewBox, viewBoxWidth: vbW, viewBoxHeight: vbH, refX, refY, pins });
+        const bounds = measureSymbolBounds(symbolId);
+        variants.push({
+          symbolId,
+          viewBox,
+          viewBoxWidth: vbW,
+          viewBoxHeight: vbH,
+          refX,
+          refY,
+          pins,
+          bboxX: bounds.x,
+          bboxY: bounds.y,
+          bboxWidth: bounds.width,
+          bboxHeight: bounds.height,
+        });
       }
 
       if (variants.length === 0) continue;

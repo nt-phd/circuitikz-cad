@@ -1,8 +1,9 @@
-import type { ComponentInstance, BipoleInstance, MonopoleInstance, WireInstance, TerminalMark } from '../types';
+import type { BipoleInstance, MonopoleInstance, NodeInstance, WireInstance, TerminalMark } from '../types';
 import type { CircuitDocument } from '../model/CircuitDocument';
 import type { ComponentRegistry } from '../definitions/ComponentRegistry';
 import { formatCoord } from './CoordFormatter';
 import { formatLabel } from './LabelFormatter';
+import { emitWirePath } from './WirePathEmitter';
 
 /**
  * Emits the tikzpicture body (without \begin/\end) from a CircuitDocument.
@@ -32,10 +33,13 @@ export class CircuiTikZEmitter {
     for (const comp of doc.components) {
       if (comp.type === 'bipole') {
         const def = this.registry.get(comp.defId);
-        if (def) lines.push(this.emitBipole(comp as BipoleInstance, def.tikzName));
+        if (def) lines.push(this.emitBipole(comp, def.tikzName));
       } else if (comp.type === 'monopole') {
         const def = this.registry.get(comp.defId);
-        if (def) lines.push(this.emitMonopole(comp as MonopoleInstance, def.tikzName));
+        if (def) lines.push(this.emitPlacedNode(comp, def.tikzName));
+      } else if (comp.type === 'node') {
+        const def = this.registry.get(comp.defId);
+        if (def) lines.push(this.emitPlacedNode(comp, def.tikzName));
       }
     }
 
@@ -57,12 +61,17 @@ export class CircuiTikZEmitter {
   }
 
   private emitMonopole(comp: MonopoleInstance, tikzName: string): string {
-    return `\\draw ${formatCoord(comp.position)} node[${tikzName}] {};`;
+    return this.emitPlacedNode(comp, tikzName);
   }
 
   private emitWire(wire: WireInstance): string {
     if (wire.points.length < 2) return '';
-    return `\\draw ${wire.points.map(formatCoord).join(' -- ')};`;
+    return `\\draw ${emitWirePath(wire)};`;
+  }
+
+  private emitPlacedNode(comp: MonopoleInstance | NodeInstance, tikzName: string): string {
+    const nodeName = comp.nodeName ? `(${comp.nodeName})` : '';
+    return `\\node[${tikzName}]${nodeName} at ${formatCoord(comp.position)} {};`;
   }
 
   private terminalString(start?: TerminalMark, end?: TerminalMark): string {
