@@ -210,18 +210,19 @@ function PanelSection({
           >
             {title}
           </Typography>
-          {actions ? (
-            <Box
-              onClick={(event) => event.stopPropagation()}
-              onFocus={(event) => event.stopPropagation()}
-              onMouseDown={(event) => event.stopPropagation()}
-            >
-              <Stack direction="row" spacing={0.75}>
-                {actions}
-              </Stack>
-            </Box>
-          ) : null}
         </Stack>
+        {actions ? (
+          <Box
+            onClick={(event) => event.stopPropagation()}
+            onFocus={(event) => event.stopPropagation()}
+            onMouseDown={(event) => event.stopPropagation()}
+            sx={{ ml: 'auto', mr: 1 }}
+          >
+            <Stack direction="row" spacing={0.75}>
+              {actions}
+            </Stack>
+          </Box>
+        ) : null}
         <ExpandMoreRoundedIcon
           fontSize="small"
           sx={{
@@ -846,7 +847,6 @@ function LibraryTooltipContent({
           borderColor: 'divider',
           borderRadius: 1,
           display: 'flex',
-          height: 224,
           justifyContent: 'center',
           mt: 1,
           overflow: 'hidden',
@@ -864,8 +864,7 @@ function LibraryTooltipContent({
               '& svg': {
                 display: 'block',
                 height: 'auto',
-                maxHeight: '176px',
-                maxWidth: '100%',
+                margin: '20px',
                 overflow: 'visible',
                 transform: 'scale(2)',
                 transformOrigin: 'center center',
@@ -1647,14 +1646,23 @@ function AppShell({
 
         <PanelSection
           actions={
-            <>
-              <Button onClick={() => void appState.onCopy()} size="small" startIcon={<DataObjectRoundedIcon fontSize="small" />} variant="outlined">
+            <ButtonGroup
+              size="small"
+              variant="outlined"
+              sx={{
+                ml: 'auto',
+                '& .MuiButton-root': {
+                  minHeight: 32,
+                },
+              }}
+            >
+              <Button onClick={() => void appState.onCopy()} startIcon={<DataObjectRoundedIcon fontSize="small" />}>
                 {appState.copyLabel}
               </Button>
-              <Button onClick={appState.onDownloadSvg} size="small" startIcon={<DownloadRoundedIcon fontSize="small" />} variant="outlined">
+              <Button onClick={appState.onDownloadSvg} startIcon={<DownloadRoundedIcon fontSize="small" />}>
                 SVG
               </Button>
-            </>
+            </ButtonGroup>
           }
           expanded={!collapsed.document}
           grow
