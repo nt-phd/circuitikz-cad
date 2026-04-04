@@ -3,6 +3,7 @@
  *
  * DOM structure inside `container`:
  *   div.world-transform          ← CSS transform: translate(panX,panY) scale(zoom)
+ *     svg.grid-layer             ← grid dots, pointer-events:none
  *     div.latex-layer            ← injected SVG from pdflatex+pdf2svg, pointer-events:none
  *     svg.overlay-layer          ← grid, ghost, selection — receives mouse events
  *
@@ -20,12 +21,12 @@ import type { ComponentRegistry } from '../definitions/ComponentRegistry';
 import type { SelectionState } from '../model/SelectionState';
 import { ViewTransform } from './ViewTransform';
 import { SnapEngine } from './SnapEngine';
-import { GhostRenderer } from './GhostRenderer';
+import { GhostRenderer, type GhostLatexPreview } from './GhostRenderer';
 import { HitTester } from './HitTester';
 import {
   GRID_SIZE, TIKZ_PT_PER_UNIT, RENDER_SERVER_URL,
   MAJOR_GRID_EVERY, GRID_COLOR_MINOR, GRID_COLOR_MAJOR,
-  ZOOM_STEP, SNAP_GRID,
+  ZOOM_STEP,
 } from '../constants';
 import { scaleState } from './ScaleState';
 import { createSvgElement } from '../utils/svg';
@@ -33,6 +34,7 @@ import { createSvgElement } from '../utils/svg';
 // Base pt-to-px at zoom=1, scale=1: 20px per TikZ unit, 1 TikZ unit = TIKZ_PT_PER_UNIT pt
 // The actual conversion must include tikzScale: PT_TO_PX * tikzScale
 const BASE_PT_TO_PX = GRID_SIZE / TIKZ_PT_PER_UNIT;
+const ZOOM_LEVELS = [1, 2, 3, 4, 5];
 
 export class LatexCanvas {
   readonly view: ViewTransform;
@@ -41,21 +43,31 @@ export class LatexCanvas {
   readonly hitTester: HitTester;
 
   private worldDiv: HTMLDivElement;
+  private gridSvg: SVGSVGElement;
   private latexDiv: HTMLDivElement;
+  private ghostLatexDiv: HTMLDivElement;
   readonly overlaySvg: SVGSVGElement;
 
   private renderInFlight = false;
   private renderPending = false;
   private errorBanner: HTMLDivElement | null = null;
+  private hasPerformedInitialFit = false;
+  private renderedContentBounds: { left: number; top: number; width: number; height: number } | null = null;
 
   // Grid SVG elements
   private patternMinor!: SVGPatternElement;
   private patternMajor!: SVGPatternElement;
-  private gridRect!: SVGRectElement;
+  private minorDot!: SVGCircleElement;
+  private majorDot!: SVGCircleElement;
+  private gridRectMinor!: SVGRectElement;
+  private gridRectMajor!: SVGRectElement;
+  private interactionRect!: SVGRectElement;
+  private ghostSvgNonce = 0;
 
   // Pan/zoom
   private spaceHeld = false;
   private isPanning = false;
+  private primaryPanEnabled = false;
   private lastPanX = 0;
   private lastPanY = 0;
 
@@ -74,10 +86,21 @@ export class LatexCanvas {
     this.worldDiv.className = 'world-transform';
     container.appendChild(this.worldDiv);
 
+    // Grid layer below LaTeX render and interaction overlay
+    this.gridSvg = createSvgElement('svg', {
+      class: 'grid-layer',
+      width: '100%', height: '100%',
+    }) as SVGSVGElement;
+    this.worldDiv.appendChild(this.gridSvg);
+
     // LaTeX layer (pointer-events: none — mouse goes to overlay)
     this.latexDiv = document.createElement('div');
     this.latexDiv.className = 'latex-layer';
     this.worldDiv.appendChild(this.latexDiv);
+
+    this.ghostLatexDiv = document.createElement('div');
+    this.ghostLatexDiv.className = 'ghost-latex-layer';
+    this.worldDiv.appendChild(this.ghostLatexDiv);
 
     // Overlay SVG (grid + ghost + selection)
     this.overlaySvg = createSvgElement('svg', {
@@ -86,19 +109,28 @@ export class LatexCanvas {
     }) as SVGSVGElement;
     this.worldDiv.appendChild(this.overlaySvg);
 
+    const BIG = 20000;
+    this.interactionRect = createSvgElement('rect', {
+      x: -BIG, y: -BIG, width: BIG * 2, height: BIG * 2,
+      fill: 'transparent',
+      'pointer-events': 'all',
+    }) as SVGRectElement;
+    this.overlaySvg.appendChild(this.interactionRect);
+
     this.buildGrid();
 
     this.hitTester = new HitTester(circuitDoc, registry);
-    this.ghost = new GhostRenderer(this.overlaySvg, circuitDoc, registry, selection);
+    this.ghost = new GhostRenderer(
+      this.overlaySvg,
+      circuitDoc,
+      registry,
+      selection,
+      (preview) => this.setGhostLatexPreview(preview),
+    );
 
     this.attachPanZoom();
 
-    // Center origin in viewport
-    requestAnimationFrame(() => {
-      const rect = container.getBoundingClientRect();
-      this.view.pan(rect.width / 3, rect.height / 2);
-      this.refresh();
-    });
+    this.refresh();
   }
 
   // ====== PUBLIC API ======
@@ -122,17 +154,61 @@ export class LatexCanvas {
   }
 
   updateGridScale(): void {
-    const gs = scaleState.effectiveGridSize * SNAP_GRID;
+    const gs = scaleState.effectiveGridSize * scaleState.gridPitch;
     const majorSize = gs * MAJOR_GRID_EVERY;
+    this.patternMinor.setAttribute('x', String(-gs / 2));
+    this.patternMinor.setAttribute('y', String(-gs / 2));
     this.patternMinor.setAttribute('width', String(gs));
     this.patternMinor.setAttribute('height', String(gs));
+    this.minorDot.setAttribute('cx', String(gs / 2));
+    this.minorDot.setAttribute('cy', String(gs / 2));
+
+    this.patternMajor.setAttribute('x', String(-majorSize / 2));
+    this.patternMajor.setAttribute('y', String(-majorSize / 2));
     this.patternMajor.setAttribute('width', String(majorSize));
     this.patternMajor.setAttribute('height', String(majorSize));
-    const majorRect = this.patternMajor.querySelector('rect');
-    if (majorRect) {
-      majorRect.setAttribute('width', String(majorSize));
-      majorRect.setAttribute('height', String(majorSize));
-    }
+    this.majorDot.setAttribute('cx', String(majorSize / 2));
+    this.majorDot.setAttribute('cy', String(majorSize / 2));
+
+    this.updateGridDotScale();
+  }
+
+  setGridVisible(visible: boolean): void {
+    this.gridSvg.style.display = visible ? '' : 'none';
+  }
+
+  zoomIn(): void {
+    const rect = this.container.getBoundingClientRect();
+    const current = Math.round(this.view.zoom);
+    const next = ZOOM_LEVELS.find((level) => level > current) ?? ZOOM_LEVELS[ZOOM_LEVELS.length - 1];
+    this.view.setZoomAt({ x: rect.width / 2, y: rect.height / 2 }, next);
+    this.refresh();
+  }
+
+  zoomOut(): void {
+    const rect = this.container.getBoundingClientRect();
+    const current = Math.round(this.view.zoom);
+    const reversed = [...ZOOM_LEVELS].reverse();
+    const next = reversed.find((level) => level < current) ?? ZOOM_LEVELS[0];
+    this.view.setZoomAt({ x: rect.width / 2, y: rect.height / 2 }, next);
+    this.refresh();
+  }
+
+  fitToScreen(): void {
+    const content = this.renderedContentBounds;
+    const rect = this.container.getBoundingClientRect();
+    if (!content || content.width <= 0 || content.height <= 0 || rect.width <= 0 || rect.height <= 0) return;
+    const padding = 24;
+    const availableWidth = Math.max(1, rect.width - padding * 2);
+    const availableHeight = Math.max(1, rect.height - padding * 2);
+    const fitZoom = Math.min(availableWidth / content.width, availableHeight / content.height);
+    const clampedZoom = Math.max(0.1, Math.min(5, fitZoom));
+    this.view.reset(clampedZoom);
+    this.view.pan(
+      (rect.width - content.width * clampedZoom) / 2 - content.left * clampedZoom,
+      (rect.height - content.height * clampedZoom) / 2 - content.top * clampedZoom,
+    );
+    this.refresh();
   }
 
   /** Trigger a pdflatex render. Queues if one is already in flight. */
@@ -146,6 +222,18 @@ export class LatexCanvas {
 
   get isCurrentlyPanning(): boolean {
     return this.isPanning || this.spaceHeld;
+  }
+
+  setPrimaryPanEnabled(enabled: boolean): void {
+    this.primaryPanEnabled = enabled;
+    if (!enabled && !this.isPanning && !this.spaceHeld) {
+      this.overlaySvg.style.cursor = '';
+    }
+  }
+
+  getRenderedSvg(): string | null {
+    const svgEl = this.latexDiv.querySelector('svg');
+    return svgEl ? svgEl.outerHTML : null;
   }
 
   // ====== LATEX RENDER ======
@@ -173,7 +261,7 @@ export class LatexCanvas {
       }
     } catch (e) {
       console.warn('[LatexCanvas] server unreachable:', e);
-      this.showError('Render server unreachable');
+      this.showError('Render server unreachable. Start it with: npm run dev:render');
     } finally {
       this.renderInFlight = false;
       if (this.renderPending) this.doRender();
@@ -196,8 +284,16 @@ export class LatexCanvas {
     // Parse viewBox dimensions (in pt) and convert to px
     const vb = svgEl.getAttribute('viewBox')?.split(/\s+/).map(Number);
     if (vb && vb.length >= 4) {
-      svgEl.style.width  = (vb[2] * ptToPx) + 'px';
-      svgEl.style.height = (vb[3] * ptToPx) + 'px';
+      const widthPx = vb[2] * ptToPx;
+      const heightPx = vb[3] * ptToPx;
+      svgEl.style.width  = widthPx + 'px';
+      svgEl.style.height = heightPx + 'px';
+      this.renderedContentBounds = {
+        left: -tx * ptToPx,
+        top: -ty * ptToPx,
+        width: widthPx,
+        height: heightPx,
+      };
     }
     svgEl.removeAttribute('width');
     svgEl.removeAttribute('height');
@@ -206,6 +302,83 @@ export class LatexCanvas {
     // Align TikZ(0,0) with world origin
     this.latexDiv.style.left = (-tx * ptToPx) + 'px';
     this.latexDiv.style.top  = (-ty * ptToPx) + 'px';
+
+    if (!this.hasPerformedInitialFit) {
+      this.hasPerformedInitialFit = true;
+      requestAnimationFrame(() => this.fitToScreen());
+    }
+  }
+
+  private setGhostLatexPreview(preview: GhostLatexPreview | null): void {
+    this.ghostLatexDiv.innerHTML = '';
+    if (!preview) return;
+
+    const wrapper = document.createElement('div');
+    wrapper.className = 'ghost-latex-probe';
+    const ptToPx = BASE_PT_TO_PX;
+    const originX = preview.tx * ptToPx;
+    const originY = preview.ty * ptToPx;
+    wrapper.style.left = `${preview.anchorX - originX}px`;
+    wrapper.style.top = `${preview.anchorY - originY}px`;
+    wrapper.style.opacity = String(preview.opacity);
+    wrapper.style.transformOrigin = `${originX}px ${originY}px`;
+    if (preview.angleDeg) wrapper.style.transform = `rotate(${preview.angleDeg}deg)`;
+
+    wrapper.innerHTML = this.namespaceSvgMarkup(preview.svgMarkup);
+    const svgEl = wrapper.querySelector('svg');
+    if (!svgEl) return;
+
+    const vb = svgEl.getAttribute('viewBox')?.split(/\s+/).map(Number);
+    if (vb && vb.length >= 4) {
+      svgEl.style.width = `${vb[2] * ptToPx}px`;
+      svgEl.style.height = `${vb[3] * ptToPx}px`;
+    }
+    svgEl.removeAttribute('width');
+    svgEl.removeAttribute('height');
+    svgEl.style.display = 'block';
+    svgEl.style.overflow = 'visible';
+
+    this.ghostLatexDiv.appendChild(wrapper);
+  }
+
+  private namespaceSvgMarkup(svgMarkup: string): string {
+    const parser = new DOMParser();
+    const doc = parser.parseFromString(svgMarkup, 'image/svg+xml');
+    const svg = doc.querySelector('svg');
+    if (!svg) return svgMarkup;
+
+    const prefix = `ghost-${++this.ghostSvgNonce}-`;
+    const idMap = new Map<string, string>();
+    for (const el of svg.querySelectorAll('[id]')) {
+      const oldId = el.getAttribute('id');
+      if (!oldId) continue;
+      const newId = `${prefix}${oldId}`;
+      idMap.set(oldId, newId);
+      el.setAttribute('id', newId);
+    }
+
+    const rewriteValue = (value: string | null): string | null => {
+      if (!value) return value;
+      let next = value;
+      for (const [oldId, newId] of idMap) {
+        next = next.replaceAll(`url(#${oldId})`, `url(#${newId})`);
+        next = next.replaceAll(`#${oldId}`, `#${newId}`);
+      }
+      return next;
+    };
+
+    for (const el of svg.querySelectorAll('*')) {
+      for (const attr of ['href', 'xlink:href', 'clip-path', 'fill', 'filter', 'mask', 'marker-start', 'marker-mid', 'marker-end']) {
+        const value = el.getAttribute(attr);
+        const rewritten = rewriteValue(value);
+        if (rewritten && rewritten !== value) el.setAttribute(attr, rewritten);
+      }
+      const style = el.getAttribute('style');
+      const rewrittenStyle = rewriteValue(style);
+      if (rewrittenStyle && rewrittenStyle !== style) el.setAttribute('style', rewrittenStyle);
+    }
+
+    return svg.outerHTML;
   }
 
   // ====== ERROR BANNER ======
@@ -229,42 +402,63 @@ export class LatexCanvas {
 
   private buildGrid(): void {
     const defs = createSvgElement('defs') as SVGDefsElement;
-
-    // Grid tile size = effectiveGridSize × SNAP_GRID.
-    // Updated in updateGridScale() when the scale changes.
-    const gs = scaleState.effectiveGridSize * SNAP_GRID;
+    const gs = scaleState.effectiveGridSize * scaleState.gridPitch;
     const majorSize = gs * MAJOR_GRID_EVERY;
 
     this.patternMinor = createSvgElement('pattern', {
-      id: 'lc-grid-minor', patternUnits: 'userSpaceOnUse',
-      x: 0, y: 0, width: gs, height: gs,
+      id: 'lc-grid-minor',
+      patternUnits: 'userSpaceOnUse',
+      x: -gs / 2,
+      y: -gs / 2,
+      width: gs,
+      height: gs,
     }) as SVGPatternElement;
-    this.patternMinor.appendChild(createSvgElement('circle', {
-      cx: 0, cy: 0, r: 0.75, fill: GRID_COLOR_MINOR,
-    }));
+    this.minorDot = createSvgElement('circle', {
+      cx: gs / 2,
+      cy: gs / 2,
+      r: 1,
+      fill: GRID_COLOR_MINOR,
+    }) as SVGCircleElement;
+    this.patternMinor.appendChild(this.minorDot);
     defs.appendChild(this.patternMinor);
 
     this.patternMajor = createSvgElement('pattern', {
-      id: 'lc-grid-major', patternUnits: 'userSpaceOnUse',
-      x: 0, y: 0, width: majorSize, height: majorSize,
+      id: 'lc-grid-major',
+      patternUnits: 'userSpaceOnUse',
+      x: -majorSize / 2,
+      y: -majorSize / 2,
+      width: majorSize,
+      height: majorSize,
     }) as SVGPatternElement;
-    this.patternMajor.appendChild(createSvgElement('rect', {
-      x: 0, y: 0, width: majorSize, height: majorSize,
-      fill: 'url(#lc-grid-minor)',
-    }));
-    this.patternMajor.appendChild(createSvgElement('circle', {
-      cx: 0, cy: 0, r: 1.5, fill: GRID_COLOR_MAJOR,
-    }));
+    this.majorDot = createSvgElement('circle', {
+      cx: majorSize / 2,
+      cy: majorSize / 2,
+      r: 1.75,
+      fill: GRID_COLOR_MAJOR,
+    }) as SVGCircleElement;
+    this.patternMajor.appendChild(this.majorDot);
     defs.appendChild(this.patternMajor);
 
-    this.overlaySvg.appendChild(defs);
+    this.gridSvg.appendChild(defs);
 
     const BIG = 20000;
-    this.gridRect = createSvgElement('rect', {
-      x: -BIG, y: -BIG, width: BIG * 2, height: BIG * 2,
+    this.gridRectMinor = createSvgElement('rect', {
+      x: -BIG,
+      y: -BIG,
+      width: BIG * 2,
+      height: BIG * 2,
+      fill: 'url(#lc-grid-minor)',
+    }) as SVGRectElement;
+    this.gridRectMajor = createSvgElement('rect', {
+      x: -BIG,
+      y: -BIG,
+      width: BIG * 2,
+      height: BIG * 2,
       fill: 'url(#lc-grid-major)',
     }) as SVGRectElement;
-    this.overlaySvg.insertBefore(this.gridRect, this.overlaySvg.firstChild);
+    this.gridSvg.appendChild(this.gridRectMinor);
+    this.gridSvg.appendChild(this.gridRectMajor);
+    this.updateGridDotScale();
   }
 
   // ====== PAN/ZOOM ======
@@ -272,6 +466,14 @@ export class LatexCanvas {
   private applyTransform(): void {
     this.worldDiv.style.transform =
       `translate(${this.view.panX}px, ${this.view.panY}px) scale(${this.view.zoom})`;
+    this.updateGridDotScale();
+  }
+
+  private updateGridDotScale(): void {
+    const minorRadius = 1 / this.view.zoom;
+    const majorRadius = 1.75 / this.view.zoom;
+    this.minorDot?.setAttribute('r', String(minorRadius));
+    this.majorDot?.setAttribute('r', String(majorRadius));
   }
 
   private attachPanZoom(): void {
@@ -287,7 +489,7 @@ export class LatexCanvas {
     }, { passive: false });
 
     el.addEventListener('mousedown', (e: MouseEvent) => {
-      if (e.button === 1 || (e.button === 0 && this.spaceHeld)) {
+      if (e.button === 1 || (e.button === 0 && (this.spaceHeld || this.primaryPanEnabled))) {
         e.preventDefault();
         this.isPanning = true;
         this.lastPanX = e.clientX;
@@ -307,7 +509,7 @@ export class LatexCanvas {
     window.addEventListener('mouseup', (e: MouseEvent) => {
       if (this.isPanning && (e.button === 1 || e.button === 0)) {
         this.isPanning = false;
-        el.style.cursor = this.spaceHeld ? 'grab' : '';
+        el.style.cursor = this.spaceHeld || this.primaryPanEnabled ? 'grab' : '';
       }
     });
 

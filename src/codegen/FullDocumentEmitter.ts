@@ -11,13 +11,8 @@ export const DEFAULT_PREAMBLE = `\\usepackage{amsmath}
 \\usepackage{amsfonts}
 \\usepackage{amssymb}
 
-\\usepackage{newpxtext}
-\\usepackage{newpxmath}
-
 \\usepackage{tikz}
 \\usepackage{circuitikz}
-\\usepackage{pgfplots}
-\\pgfplotsset{compat=1.18}
 
 \\ctikzset{resistors/scale=0.6}
 \\ctikzset{inductors/scale=0.8}

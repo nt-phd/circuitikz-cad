@@ -2,7 +2,7 @@
  * Populates the ComponentRegistry from the loaded SymbolsDB.
  * This replaces the hand-coded bipoles/grounds/sources definition files.
  */
-import type { ComponentDef, PlacementType } from '../types';
+import type { ComponentDef, PlacementType, ScaleFamily } from '../types';
 import type { ComponentRegistry } from './ComponentRegistry';
 import type { SymbolsDB } from '../data/symbolsDB';
 
@@ -29,6 +29,17 @@ const GROUP_TO_CATEGORY: Record<string, ComponentDef['category']> = {
   'Tubes':                          'misc',
 };
 
+function inferScaleFamily(entry: { class: string; group: string; type: 'path' | 'node' }, placementType: PlacementType): ScaleFamily {
+  const cls = entry.class.toLowerCase();
+  if (cls.includes('resistor')) return 'resistors';
+  if (cls.includes('capacitor')) return 'capacitors';
+  if (cls.includes('inductor')) return 'inductors';
+  if (cls.includes('source')) return 'sources';
+  if (cls.includes('amplifier') || cls.includes('opamp')) return 'amplifiers';
+  if (placementType === 'node' || placementType === 'monopole' || entry.type === 'node') return 'nodes';
+  return 'misc';
+}
+
 export function populateRegistryFromSymbolsDB(
   registry: ComponentRegistry,
   db: SymbolsDB,
@@ -54,6 +65,7 @@ export function populateRegistryFromSymbolsDB(
 
     const category: ComponentDef['category'] =
       GROUP_TO_CATEGORY[entry.group] ?? 'misc';
+    const scaleFamily = inferScaleFamily(entry, placementType);
 
     // For bipoles: pin START absolute x = refX + pinStart.x
     // (pins in symbolsDB are stored as offsets from refX)
@@ -72,10 +84,15 @@ export function populateRegistryFromSymbolsDB(
       symbolRefX: v.refX,
       symbolRefY: v.refY,
       symbolPins: v.pins.map((pin) => ({ name: pin.name, x: pin.x, y: pin.y })),
+      shapeBBoxX: v.bboxX,
+      shapeBBoxY: v.bboxY,
+      shapeBBoxW: v.bboxWidth,
+      shapeBBoxH: v.bboxHeight,
       viewBox: v.viewBox,
       viewBoxW: v.viewBoxWidth,
       viewBoxH: v.viewBoxHeight,
       defaultProps: {},
+      scaleFamily,
       group: entry.group,
     };
 

@@ -1,11 +1,11 @@
 import type { GridPoint, ScreenPoint } from '../types';
-import { MIN_ZOOM, MAX_ZOOM, SNAP_GRID } from '../constants';
+import { MIN_ZOOM, MAX_ZOOM } from '../constants';
 import { scaleState } from './ScaleState';
 
 export class ViewTransform {
   private _panX = 0;
   private _panY = 0;
-  private _zoom = 1.0;
+  private _zoom = 2.0;
 
   get panX(): number { return this._panX; }
   get panY(): number { return this._panY; }
@@ -28,8 +28,8 @@ export class ViewTransform {
     const world = this.screenToWorld(screen);
     const raw = this.worldToGrid(world);
     return {
-      x: Math.round(raw.x / SNAP_GRID) * SNAP_GRID,
-      y: Math.round(raw.y / SNAP_GRID) * SNAP_GRID,
+      x: Math.round(raw.x / scaleState.gridPitch) * scaleState.gridPitch,
+      y: Math.round(raw.y / scaleState.gridPitch) * scaleState.gridPitch,
     };
   }
 
@@ -49,12 +49,24 @@ export class ViewTransform {
     this._panY += dy;
   }
 
+  reset(zoom = 2.0): void {
+    this._panX = 0;
+    this._panY = 0;
+    this._zoom = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, zoom));
+  }
+
   zoomAt(screenPt: ScreenPoint, factor: number): void {
     const oldZoom = this._zoom;
     this._zoom = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, this._zoom * factor));
     const ratio = this._zoom / oldZoom;
     this._panX = screenPt.x - ratio * (screenPt.x - this._panX);
     this._panY = screenPt.y - ratio * (screenPt.y - this._panY);
+  }
+
+  setZoomAt(screenPt: ScreenPoint, zoom: number): void {
+    const target = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, zoom));
+    const factor = target / this._zoom;
+    this.zoomAt(screenPt, factor);
   }
 
   toSvgTransform(): string {

@@ -8,43 +8,7 @@
   <link rel="stylesheet" href="/styles/main.css" />
 </head>
 <body>
-  <div id="app">
-    <div id="toolbar" class="toolbar"></div>
-
-    <div id="left-panel" class="left-panel">
-      <div class="rpanel-section rpanel-section--grow" id="section-library">
-        <div class="rpanel-section-header" data-target="section-library">
-          <span>Library</span><span class="rpanel-chevron">▼</span>
-        </div>
-        <div class="rpanel-section-body" id="palette"></div>
-      </div>
-
-      <div class="rpanel-section" id="section-props">
-        <div class="rpanel-section-header" data-target="section-props">
-          <span>Properties</span><span class="rpanel-chevron">▼</span>
-        </div>
-        <div class="rpanel-section-body" id="props"></div>
-      </div>
-
-      <div class="rpanel-section rpanel-section--code" id="section-preamble">
-        <div class="rpanel-section-header" data-target="section-preamble">
-          <span>Preamble</span><span class="rpanel-chevron">▶</span>
-        </div>
-        <div class="rpanel-section-body rpanel-section-body--collapsed" id="preamble-panel"></div>
-      </div>
-
-      <div class="rpanel-section rpanel-section--code rpanel-section--grow" id="section-document">
-        <div class="rpanel-section-header" data-target="section-document">
-          <span>Document</span><span class="rpanel-chevron">▼</span>
-        </div>
-        <div class="rpanel-section-body" id="document-panel"></div>
-      </div>
-    </div>
-
-    <div id="canvas-container" class="canvas-container"></div>
-
-    <div id="status-bar" class="status-bar"></div>
-  </div>
-  <script type="module" src="/src/main.ts"></script>
+  <div id="app"></div>
+  <script type="module" src="/src/main.tsx"></script>
 </body>
 </html>

@@ -1,8 +1,9 @@
-import type { ComponentInstance, BipoleInstance, MonopoleInstance, WireInstance, TerminalMark } from '../types';
+import type { BipoleInstance, MonopoleInstance, NodeInstance, WireInstance, TerminalMark, DrawingInstance } from '../types';
 import type { CircuitDocument } from '../model/CircuitDocument';
 import type { ComponentRegistry } from '../definitions/ComponentRegistry';
 import { formatCoord } from './CoordFormatter';
 import { formatLabel } from './LabelFormatter';
+import { emitWirePath } from './WirePathEmitter';
 
 /**
  * Emits the tikzpicture body (without \begin/\end) from a CircuitDocument.
@@ -29,13 +30,21 @@ export class CircuiTikZEmitter {
       if (l) lines.push(l);
     }
 
+    for (const drawing of doc.drawings) {
+      const l = this.emitDrawing(drawing);
+      if (l) lines.push(l);
+    }
+
     for (const comp of doc.components) {
       if (comp.type === 'bipole') {
         const def = this.registry.get(comp.defId);
-        if (def) lines.push(this.emitBipole(comp as BipoleInstance, def.tikzName));
+        if (def) lines.push(this.emitBipole(comp, def.tikzName));
       } else if (comp.type === 'monopole') {
         const def = this.registry.get(comp.defId);
-        if (def) lines.push(this.emitMonopole(comp as MonopoleInstance, def.tikzName));
+        if (def) lines.push(this.emitPlacedNode(comp, def.tikzName));
+      } else if (comp.type === 'node') {
+        const def = this.registry.get(comp.defId);
+        if (def) lines.push(this.emitPlacedNode(comp, def.tikzName));
       }
     }
 
@@ -57,12 +66,41 @@ export class CircuiTikZEmitter {
   }
 
   private emitMonopole(comp: MonopoleInstance, tikzName: string): string {
-    return `\\draw ${formatCoord(comp.position)} node[${tikzName}] {};`;
+    return this.emitPlacedNode(comp, tikzName);
   }
 
   private emitWire(wire: WireInstance): string {
     if (wire.points.length < 2) return '';
-    return `\\draw ${wire.points.map(formatCoord).join(' -- ')};`;
+    return `\\draw ${emitWirePath(wire)};`;
+  }
+
+  private emitPlacedNode(comp: MonopoleInstance | NodeInstance, tikzName: string): string {
+    const optionParts = [tikzName];
+    if (comp.props.options) optionParts.push(comp.props.options);
+    const nodeName = comp.nodeName ? `(${comp.nodeName})` : '';
+    const base = `\\node[${optionParts.join(', ')}]${nodeName} at ${formatCoord(comp.position)} {};`;
+    if (comp.nodeName && comp.props.text) {
+      const anchor = comp.props.textAnchor || 'center';
+      return `${base} node[anchor=${anchor}] at (${comp.nodeName}.text){${comp.props.text}};`;
+    }
+    return base;
+  }
+
+  private emitDrawing(drawing: DrawingInstance): string {
+    switch (drawing.kind) {
+      case 'line':
+        return `\\draw[${drawing.props.options || 'thin'}] ${formatCoord(drawing.start)} -- ${formatCoord(drawing.end)};`;
+      case 'arrow':
+        return `\\draw[${drawing.props.options || '->'}] ${formatCoord(drawing.start)} -- ${formatCoord(drawing.end)};`;
+      case 'text':
+        return `\\node at ${formatCoord(drawing.position)} {${drawing.props.text ?? 'Text'}};`;
+      case 'rectangle':
+        return `\\draw[${drawing.props.options || 'thin'}] ${formatCoord(drawing.start)} rectangle ${formatCoord(drawing.end)};`;
+      case 'circle':
+        return `\\draw[${drawing.props.options || 'thin'}] ${formatCoord(drawing.center)} circle (${drawing.radius});`;
+      case 'bezier':
+        return `\\draw[${drawing.props.options || 'thin'}] ${formatCoord(drawing.start)} .. controls ${formatCoord(drawing.control1)} and ${formatCoord(drawing.control2)} .. ${formatCoord(drawing.end)};`;
+    }
   }
 
   private terminalString(start?: TerminalMark, end?: TerminalMark): string {

@@ -14,8 +14,6 @@ export const DEFAULT_PREAMBLE = `\\usepackage{amsmath}
 
 \\usepackage{tikz}
 \\usepackage{circuitikz}
-\\usepackage{pgfplots}
-\\pgfplotsset{compat=1.18}
 
 \\ctikzset{resistors/scale=0.6}
 \\ctikzset{inductors/scale=0.8}
@@ -25,7 +23,7 @@ export const DEFAULT_PREAMBLE = `\\usepackage{amsmath}
 
 export const DEFAULT_BODY = `\\begin{tikzpicture}[scale=0.7]
 
-\\node[op amp, yscale=-1](N1) at (3.06, 3){} node[anchor=center] at (N1.text){$U_1$};
+\\node[op amp, yscale=-1](N1) at (3, 3){} node[anchor=center] at (N1.text){$U_1$};
 
 \\draw (3,1) to[american resistor, l={$R_2$}] (5,1);
 \\draw (1, -0.5) to[capacitor, l={$C_1$}] (3, -0.5);
@@ -33,8 +31,8 @@ export const DEFAULT_BODY = `\\begin{tikzpicture}[scale=0.7]
 \\draw (1, 1) to[american resistor, l={$R_1$}] (3, 1);
 
 \\draw (3,-0.5) -- (3, 1);
-\\draw (5,-0.5) |- (4.25, 3);
-\\draw (1, -1) -- (1, 2.5) |- (N1.-);
+\\draw (5,-0.5) |- (N1.out);
+\\draw (1, -1) |- (N1.-);
 \\draw (1, -1) to[american resistor, l={$R_0$}] (1, -3);
 
 \\node[sground] at (1, -3){};

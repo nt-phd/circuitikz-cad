@@ -5,10 +5,23 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "dev:render": "/usr/bin/node render-server/server.mjs",
+    "dev:all": "/bin/bash -lc '/usr/bin/node render-server/server.mjs & vite'",
     "build": "tsc && vite build",
     "preview": "vite preview"
   },
+  "dependencies": {
+    "@emotion/react": "^11.14.0",
+    "@emotion/styled": "^11.14.1",
+    "@mui/icons-material": "^7.3.9",
+    "@mui/material": "^7.3.9",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0"
+  },
   "devDependencies": {
+    "@types/react": "^19.2.2",
+    "@types/react-dom": "^19.2.2",
+    "@vitejs/plugin-react": "^5.1.0",
     "typescript": "~5.9.3",
     "vite": "^8.0.1"
   }

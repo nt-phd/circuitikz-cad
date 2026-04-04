@@ -15,7 +15,8 @@ export class PlaceMonopoleTool extends BaseTool {
       return;
     }
     const tikzName = this.ctx.getDef(this.defId)?.tikzName ?? this.defId;
-    this.ctx.appendLine(`\\draw ${formatCoord(gridPt)} node[${tikzName}] {};`);
+    const nodeName = this.ctx.getDocument().nextNodeName();
+    this.ctx.appendLine(`\\node[${tikzName}](${nodeName}) at ${formatCoord(gridPt)} {};`);
   }
 
   onMouseMove(gridPt: GridPoint, _e: MouseEvent): void {
