@@ -1061,26 +1061,10 @@ function PropertiesView({
               <MenuItem value="2">2</MenuItem>
             </Select>
           </FormControl>
-          <TextField
-            fullWidth
-            label="Preamble"
-            multiline
-            onBlur={commitPreamble}
-            onChange={(event) => setDraftPreamble(event.target.value)}
-            onKeyDown={stopShortcutPropagation}
-            spellCheck={false}
-            sx={{
-              '& .MuiInputBase-root': { alignItems: 'flex-start' },
-              '& textarea': {
-                fontFamily: '"Roboto Mono", monospace',
-                fontSize: 12,
-                lineHeight: 1.5,
-                minHeight: 180,
-                whiteSpace: 'pre',
-              },
-            }}
-            value={draftPreamble}
-            variant="outlined"
+          <PreambleEditor
+            commitPreamble={commitPreamble}
+            preamble={draftPreamble}
+            setPreamble={setDraftPreamble}
           />
         </>
       ) : null}
@@ -1431,7 +1415,7 @@ function useAppState(handle: ImperativeAppHandle | null) {
 
   const onCopy = async () => {
     if (!handle) return;
-    await navigator.clipboard.writeText(handle.getFullLatexSource());
+    await navigator.clipboard.writeText(handle.getBody());
     setCopyLabel('Copied');
     window.setTimeout(() => setCopyLabel('Copy'), 1500);
   };
@@ -1657,6 +1641,85 @@ function DocumentEditor({
           value={body}
         />
       </Box>
+    </Box>
+  );
+}
+
+function PreambleEditor({
+  commitPreamble,
+  preamble,
+  setPreamble,
+}: {
+  commitPreamble: () => void;
+  preamble: string;
+  setPreamble: (value: string) => void;
+}) {
+  return (
+    <Box
+      sx={{
+        border: 1,
+        borderColor: 'divider',
+        borderRadius: 1,
+        minHeight: 220,
+        overflow: 'hidden',
+        '& > .cm-theme': {
+          height: '220px',
+          minWidth: 0,
+        },
+        '& .cm-editor': {
+          backgroundColor: 'background.paper',
+          color: 'text.primary',
+          fontFamily: '"Roboto Mono", monospace',
+          fontSize: 12,
+          height: '100%',
+          minWidth: 0,
+        },
+        '& .cm-focused': {
+          outline: 'none',
+        },
+        '& .cm-scroller': {
+          fontFamily: '"Roboto Mono", monospace',
+          height: '100%',
+          lineHeight: 1.5,
+          overflowX: 'auto',
+          overflowY: 'auto',
+          width: '100%',
+        },
+        '& .cm-gutters': {
+          backgroundColor: 'background.paper',
+          borderRightColor: 'divider',
+        },
+        '& .cm-content': {
+          minHeight: '100%',
+          paddingBottom: '48px',
+          whiteSpace: 'pre',
+          width: 'max-content',
+          minWidth: '100%',
+        },
+        '& .cm-line': {
+          whiteSpace: 'pre',
+        },
+        '& .cm-activeLineGutter': {
+          backgroundColor: 'action.hover',
+        },
+        '& .cm-activeLine': {
+          backgroundColor: 'action.hover',
+        },
+      }}
+    >
+      <CodeMirror
+        basicSetup={{
+          foldGutter: false,
+          highlightActiveLine: true,
+          highlightActiveLineGutter: true,
+        }}
+        extensions={[lineNumbers(), latexLanguage]}
+        height="220px"
+        onBlur={commitPreamble}
+        onChange={(value) => setPreamble(value)}
+        style={{ height: '220px' }}
+        value={preamble}
+      />
     </Box>
   );
 }

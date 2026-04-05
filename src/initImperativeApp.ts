@@ -69,9 +69,40 @@ function emitComponentLine(comp: ComponentInstance): string | null {
   return null;
 }
 
+function emitComponentSegment(comp: ComponentInstance): string | null {
+  const def = registry.get(comp.defId);
+  const tikzName = def?.tikzName ?? comp.defId;
+  if (comp.type === 'bipole') {
+    const opts: string[] = [tikzName];
+    const term = terminalString(comp.props.startTerminal, comp.props.endTerminal);
+    if (term !== '-') opts.push(term);
+    if (comp.props.label) opts.push(`l=${formatLabel(comp.props.label)}`);
+    if (comp.props.voltage) opts.push(`v=${formatLabel(comp.props.voltage)}`);
+    if (comp.props.current) opts.push(`i=${formatLabel(comp.props.current)}`);
+    return `${formatCoord(comp.start)} to[${opts.join(', ')}] ${formatCoord(comp.end)}`;
+  }
+  if (comp.type === 'monopole' || comp.type === 'node') {
+    const optionParts = [tikzName];
+    const extraOptions = (comp.props.options ?? '')
+      .split(',')
+      .map((part) => part.trim())
+      .filter(Boolean)
+      .filter((part) => !part.startsWith('rotate='));
+    if (comp.rotation) extraOptions.push(`rotate=${comp.rotation}`);
+    if (extraOptions.length > 0) optionParts.push(extraOptions.join(', '));
+    return `${formatCoord(comp.position)} node[${optionParts.join(', ')}] {}`;
+  }
+  return null;
+}
+
 function emitWireLine(wire: WireInstance): string {
   if (wire.points.length < 2) return '\\draw ;';
   return `\\draw ${emitWirePath(wire)};`;
+}
+
+function emitWireSegment(wire: WireInstance): string {
+  if (wire.points.length < 2) return '';
+  return emitWirePath(wire);
 }
 
 function emitDrawingLine(drawing: DrawingInstance): string {
@@ -110,7 +141,12 @@ function updateBodyLinePreservingStructure(body: string, lineIndex: number, repl
   if (lineIndex < 0 || lineIndex >= lines.length) return body;
   const original = lines[lineIndex];
   const indent = original.match(/^\s*/)?.[0] ?? '';
-  lines[lineIndex] = `${indent}${replacement}`;
+  const trimmed = original.trim();
+  const compactSegment = trimmed.startsWith('(');
+  const normalized = compactSegment
+    ? replacement.replace(/^\\draw\s+/, '').replace(/;$/, '')
+    : replacement;
+  lines[lineIndex] = `${indent}${normalized}`;
 
   return lines.join('\n');
 }
@@ -122,6 +158,61 @@ function removeBodyLines(body: string, lineIndices: number[]): string {
     if (lineIndex >= 0 && lineIndex < lines.length) lines.splice(lineIndex, 1);
   }
   return lines.join('\n');
+}
+
+function lineIdParts(id: string): { lineIndex: number; subIndex: number | null } {
+  const m = id.match(/^line:(\d+)(?::(\d+))?$/);
+  return {
+    lineIndex: m ? Number.parseInt(m[1], 10) : -1,
+    subIndex: m?.[2] ? Number.parseInt(m[2], 10) : null,
+  };
+}
+
+function replaceBodyLinesWithGroups(
+  body: string,
+  replacements: Map<number, Array<{ id: string; line: string }>>,
+): { body: string; idMap: Map<string, string> } {
+  const lines = body.split('\n');
+  const nextLines: string[] = [];
+  const idMap = new Map<string, string>();
+
+  for (let i = 0; i < lines.length; i++) {
+    const group = replacements.get(i);
+    if (!group) {
+      nextLines.push(lines[i]);
+      continue;
+    }
+    const indent = lines[i].match(/^\s*/)?.[0] ?? '';
+    for (const entry of group) {
+      const nextLineIndex = nextLines.length;
+      nextLines.push(`${indent}${entry.line}`);
+      idMap.set(entry.id, `line:${nextLineIndex}`);
+    }
+  }
+
+  return { body: nextLines.join('\n'), idMap };
+}
+
+function collectGroupedLineReplacements(doc: CircuitDocument): Map<number, Array<{ id: string; line: string }>> {
+  const allEntries = [
+    ...doc.components.map((comp) => ({ id: comp.id, line: emitComponentLine(comp) })),
+    ...doc.wires.map((wire) => ({ id: wire.id, line: emitWireLine(wire) })),
+    ...doc.drawings.map((drawing) => ({ id: drawing.id, line: emitDrawingLine(drawing) })),
+  ].filter((entry): entry is { id: string; line: string } => Boolean(entry.line));
+
+  const replacements = new Map<number, Array<{ id: string; line: string }>>();
+  for (const entry of allEntries) {
+    const parts = lineIdParts(entry.id);
+    if (parts.subIndex === null || parts.lineIndex < 0) continue;
+    const bucket = replacements.get(parts.lineIndex) ?? [];
+    bucket.push(entry);
+    replacements.set(parts.lineIndex, bucket);
+  }
+  for (const [lineIndex, bucket] of replacements) {
+    bucket.sort((a, b) => (lineIdParts(a.id).subIndex ?? 0) - (lineIdParts(b.id).subIndex ?? 0));
+    replacements.set(lineIndex, bucket);
+  }
+  return replacements;
 }
 
 export interface ImperativeAppHandle {
@@ -311,17 +402,50 @@ async function createImperativeApp(canvasContainer: HTMLElement): Promise<Impera
   eventBus.on('document-changed', () => {
     pushUndoSnapshot();
     let nextBody = latexDoc.body;
+    const sourceLines = nextBody.split('\n');
+    const groupedLineIndices = new Set(
+      selection.getSelectedIds()
+        .map((id) => lineIdParts(id))
+        .filter((parts) => parts.subIndex !== null)
+        .map((parts) => parts.lineIndex),
+    );
+
+    if (groupedLineIndices.size > 0) {
+      const replacements = collectGroupedLineReplacements(circuitDoc);
+      for (const lineIndex of [...replacements.keys()]) {
+        if (!groupedLineIndices.has(lineIndex)) replacements.delete(lineIndex);
+      }
+
+      const replaced = replaceBodyLinesWithGroups(nextBody, replacements);
+      latexDoc.body = replaced.body;
+      syncTikzScale();
+      componentProbeService.invalidate();
+      parseCircuiTikZ(latexDoc.body, circuitDoc, registry);
+      const nextSelectedIds = selection.getSelectedIds().map((id) => replaced.idMap.get(id) ?? id);
+      selection.setSelectedIds(nextSelectedIds);
+      reconcileSelection('programmatic');
+      eventBus.emit({ type: 'body-changed' });
+      canvas.refresh();
+      canvas.scheduleRender();
+      return;
+    }
+
     for (const id of selection.getSelectedIds()) {
       const lineIdx = lineIndexFromId(id);
       if (lineIdx < 0) continue;
+      const originalLine = sourceLines[lineIdx]?.trim() ?? '';
+      const compactSegment = originalLine.startsWith('(');
       const comp = circuitDoc.getComponent(id);
       if (comp) {
-        const replacement = emitComponentLine(comp);
+        const replacement = compactSegment ? emitComponentSegment(comp) : emitComponentLine(comp);
         if (replacement) nextBody = updateBodyLinePreservingStructure(nextBody, lineIdx, replacement, 'component');
         continue;
       }
       const wire = circuitDoc.getWire(id);
-      if (wire) nextBody = updateBodyLinePreservingStructure(nextBody, lineIdx, emitWireLine(wire), 'wire');
+      if (wire) {
+        nextBody = updateBodyLinePreservingStructure(nextBody, lineIdx, compactSegment ? emitWireSegment(wire) : emitWireLine(wire), 'wire');
+        continue;
+      }
       const drawing = circuitDoc.getDrawing(id);
       if (drawing) nextBody = updateBodyLinePreservingStructure(nextBody, lineIdx, emitDrawingLine(drawing), 'wire');
     }
@@ -338,8 +462,15 @@ async function createImperativeApp(canvasContainer: HTMLElement): Promise<Impera
     syncTikzScale();
     componentProbeService.invalidate();
     parseCircuiTikZ(latexDoc.body, circuitDoc, registry);
+    const groupedReplacements = collectGroupedLineReplacements(circuitDoc);
+    if (groupedReplacements.size > 0) {
+      const replaced = replaceBodyLinesWithGroups(latexDoc.body, groupedReplacements);
+      latexDoc.body = replaced.body;
+      parseCircuiTikZ(latexDoc.body, circuitDoc, registry);
+    }
     selection.setSelectedIds(previousSelection);
     reconcileSelection('programmatic');
+    eventBus.emit({ type: 'body-changed' });
     canvas.refresh();
     canvas.scheduleRender();
   });

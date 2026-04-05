@@ -182,6 +182,29 @@ function parseDrawingStatement(body: string, drawOptions: string | undefined): D
   return null;
 }
 
+function splitCompoundDrawBody(body: string): string[] | null {
+  const parts: string[] = [];
+  let remaining = body.trim();
+  const endpoint = String.raw`\([^)]+\)`;
+  const nodeRe = new RegExp(`^(${endpoint})\\s+node\\[[^\\]]+\\]\\s*\\{[\\s\\S]*?\\}`);
+  const bipoleRe = new RegExp(`^(${endpoint})\\s+to\\[[^\\]]+\\]\\s+(${endpoint})`);
+  const wireRe = new RegExp(`^(?:${endpoint}\\s*(?:(?:--|\\|-|-\\|)\\s*${endpoint}\\s*)+)`);
+
+  while (remaining) {
+    const trimmed = remaining.trimStart();
+    if (!trimmed.startsWith('(') && !trimmed.startsWith('node')) return null;
+    const match =
+      trimmed.match(nodeRe)
+      ?? trimmed.match(bipoleRe)
+      ?? trimmed.match(wireRe);
+    if (!match) return null;
+    parts.push(match[0].trim());
+    remaining = trimmed.slice(match[0].length).trimStart();
+  }
+
+  return parts.length > 1 ? parts : null;
+}
+
 function parseTerminals(opts: string[]): { startTerminal?: TerminalMark; endTerminal?: TerminalMark } {
   for (const opt of opts) {
     const m = opt.trim().match(/^([*o]?)-([*o]?)$/);
@@ -295,7 +318,7 @@ export function parseCircuiTikZ(
     if (!stripped || /^\\(begin|end)\b/.test(stripped)) continue;
 
     if (buf === '') stmtLine = i;
-    buf += (buf ? ' ' : '') + stripped;
+    buf += (buf ? '\n' : '') + stripped;
 
     if (buf.includes(';')) {
       // May have multiple statements on one logical line
@@ -310,106 +333,131 @@ export function parseCircuiTikZ(
   }
 
   for (const { text: stmt, lineIndex } of statements) {
-    // Stable ID = 'line:<lineIndex>'
-    const id = `line:${lineIndex}`;
-
-    const nodeStmtMatch = stmt.match(/^\\node\s*\[([^\]]+)\](?:\(([^)]+)\))?\s+at\s+(\([^)]+\))\s*\{[\s\S]*?\}(?:\s+node\[(.*?)\]\s+at\s+\(([^)]+)\)\s*\{([\s\S]*?)\})?$/);
-    if (nodeStmtMatch) {
-      const position = parseCoord(nodeStmtMatch[3]);
-      const opts = splitOptions(nodeStmtMatch[1]);
-      const tikzName = opts[0]?.trim();
-      const { filtered, rotation } = extractRotationOption(opts.slice(1));
-      const extraOptions = filtered.join(', ').trim() || undefined;
-      const textAnchorOpts = nodeStmtMatch[4] ? extractKV(splitOptions(nodeStmtMatch[4])) : {};
-      const textTarget = nodeStmtMatch[5]?.trim();
-      const text = nodeStmtMatch[6];
-      const props: ComponentProps = {
-        options: extraOptions,
-        text: textTarget?.endsWith('.text') ? text : undefined,
-        textAnchor: textTarget?.endsWith('.text') ? (textAnchorOpts.anchor ?? 'center') : undefined,
-      };
-      if (position && tikzName) {
-        addPlacedComponent(doc, registry, tikzToDefId, id, tikzName, position, nodeStmtMatch[2]?.trim(), props);
-        const comp = doc.getComponent(id);
-        if (comp && comp.type !== 'bipole') comp.rotation = rotation;
-      }
-      continue;
-    }
-
-    const textNodeStmtMatch = stmt.match(/^\\node\s+at\s+(\([^)]+\))\s*\{([\s\S]*?)\}$/);
-    if (textNodeStmtMatch) {
-      const position = parseCoord(textNodeStmtMatch[1]);
-      if (position) {
-        doc.addDrawing({ id, kind: 'text', position, props: { text: textNodeStmtMatch[2] } });
-      }
-      continue;
-    }
-
-    const drawMatch = stmt.match(/^\\draw(?:\[([^\]]*)\])?\s+(.+)$/s);
-    if (!drawMatch) continue;
-    const drawOptions = drawMatch[1];
-    const body = drawMatch[2].trim();
-
-    const drawing = parseDrawingStatement(body, drawOptions);
-    if (drawing) {
-      drawing.id = id;
-      doc.addDrawing(drawing);
-      continue;
-    }
-
-    // Wire: coords joined by --
-    const wirePath = parseWireStatement(body, doc, registry);
-    if (wirePath) {
-      if (wirePath.points.length >= 2) {
-        const wire: WireInstance = {
-          id,
-          points: wirePath.points,
-          pathPoints: wirePath.pathPoints,
-          startRef: wirePath.startRef,
-          endRef: wirePath.endRef,
-          operators: wirePath.operators,
-          junctions: new Map(),
+    const parseSingleStatement = (stmtText: string, id: string) => {
+      const nodeStmtMatch = stmtText.match(/^\\node\s*\[([^\]]+)\](?:\(([^)]+)\))?\s+at\s+(\([^)]+\))\s*\{[\s\S]*?\}(?:\s+node\[(.*?)\]\s+at\s+\(([^)]+)\)\s*\{([\s\S]*?)\})?$/);
+      if (nodeStmtMatch) {
+        const position = parseCoord(nodeStmtMatch[3]);
+        const opts = splitOptions(nodeStmtMatch[1]);
+        const tikzName = opts[0]?.trim();
+        const { filtered, rotation } = extractRotationOption(opts.slice(1));
+        const extraOptions = filtered.join(', ').trim() || undefined;
+        const textAnchorOpts = nodeStmtMatch[4] ? extractKV(splitOptions(nodeStmtMatch[4])) : {};
+        const textTarget = nodeStmtMatch[5]?.trim();
+        const text = nodeStmtMatch[6];
+        const props: ComponentProps = {
+          options: extraOptions,
+          text: textTarget?.endsWith('.text') ? text : undefined,
+          textAnchor: textTarget?.endsWith('.text') ? (textAnchorOpts.anchor ?? 'center') : undefined,
         };
-        doc.addWire(wire);
+        if (position && tikzName) {
+          addPlacedComponent(doc, registry, tikzToDefId, id, tikzName, position, nodeStmtMatch[2]?.trim(), props);
+          const comp = doc.getComponent(id);
+          if (comp && comp.type !== 'bipole') comp.rotation = rotation;
+        }
+        return true;
       }
-      continue;
-    }
 
-    // Monopole/Node: (x,y) node[name] {}
-    const nodeMatch = body.match(/^\(([-\d.]+)\s*,\s*([-\d.]+)\)\s+node\[([^\]]+)\]\s*\{[^}]*\}$/);
-    if (nodeMatch) {
-      const position: GridPoint = { x: parseFloat(nodeMatch[1]), y: -parseFloat(nodeMatch[2]) };
-      const opts = splitOptions(nodeMatch[3]);
-      const tikzName = opts[0]?.trim();
-      if (!tikzName) continue;
-      const props: ComponentProps = {
-        options: opts.slice(1).join(', ').trim() || undefined,
-      };
-      addPlacedComponent(doc, registry, tikzToDefId, id, tikzName, position, undefined, props);
-      continue;
-    }
+      const textNodeStmtMatch = stmtText.match(/^\\node\s+at\s+(\([^)]+\))\s*\{([\s\S]*?)\}$/);
+      if (textNodeStmtMatch) {
+        const position = parseCoord(textNodeStmtMatch[1]);
+        if (position) {
+          doc.addDrawing({ id, kind: 'text', position, props: { text: textNodeStmtMatch[2] } });
+        }
+        return true;
+      }
 
-    // Bipole: (x,y) to[opts] (x2,y2)
-    const bipoleMatch = body.match(/^(\([-\d.]+\s*,\s*[-\d.]+\))\s+to\[([^\]]+)\]\s+(\([-\d.]+\s*,\s*[-\d.]+\))$/);
-    if (bipoleMatch) {
-      const start = parseCoord(bipoleMatch[1]);
-      const end   = parseCoord(bipoleMatch[3]);
-      if (!start || !end) continue;
-      const rawOpts = splitOptions(bipoleMatch[2]);
-      const tikzName = rawOpts[0]?.trim();
-      const defId = tikzToDefId.get(tikzName) ?? tikzName;
-      const rest = rawOpts.slice(1);
-      const kv = extractKV(rest);
-      const props: ComponentProps = {
-        ...parseTerminals(rest),
-        label:   kv['l'] ?? undefined,
-        voltage: kv['v'] ?? undefined,
-        current: kv['i'] ?? undefined,
-      };
-      const comp: BipoleInstance = { id, defId, type: 'bipole', start, end, props };
-      doc.addComponent(comp);
-      continue;
-    }
+      const drawMatch = stmtText.match(/^\\draw(?:\[([^\]]*)\])?\s+(.+)$/s);
+      if (!drawMatch) return false;
+      const drawOptions = drawMatch[1];
+      const body = drawMatch[2].trim();
+
+      if (body.includes('\n')) {
+        const stmtLines = stmtText.split('\n');
+        const firstLineHasBody = /^\\draw(?:\[[^\]]*\])?\s+\S/.test(stmtLines[0].trim());
+        const rawSegments = drawMatch[2]
+          .split('\n')
+          .map((line) => line.trim())
+          .filter(Boolean);
+        const segments = rawSegments.map((line, index) => ({
+          line,
+          lineNumber: firstLineHasBody ? lineIndex + index : lineIndex + 1 + index,
+        }));
+
+        for (const segment of segments) {
+          const cleaned = segment.line.replace(/;\s*$/, '').trim();
+          if (!cleaned) continue;
+          parseSingleStatement(`\\draw ${cleaned}`, `line:${segment.lineNumber}`);
+        }
+        return true;
+      }
+
+      const drawing = parseDrawingStatement(body, drawOptions);
+      if (drawing) {
+        drawing.id = id;
+        doc.addDrawing(drawing);
+        return true;
+      }
+
+      const wirePath = parseWireStatement(body, doc, registry);
+      if (wirePath) {
+        if (wirePath.points.length >= 2) {
+          const wire: WireInstance = {
+            id,
+            points: wirePath.points,
+            pathPoints: wirePath.pathPoints,
+            startRef: wirePath.startRef,
+            endRef: wirePath.endRef,
+            operators: wirePath.operators,
+            junctions: new Map(),
+          };
+          doc.addWire(wire);
+        }
+        return true;
+      }
+
+      const nodeMatch = body.match(/^\(([-\d.]+)\s*,\s*([-\d.]+)\)\s+node\[([^\]]+)\]\s*\{[^}]*\}$/);
+      if (nodeMatch) {
+        const position: GridPoint = { x: parseFloat(nodeMatch[1]), y: -parseFloat(nodeMatch[2]) };
+        const opts = splitOptions(nodeMatch[3]);
+        const tikzName = opts[0]?.trim();
+        if (!tikzName) return true;
+        const props: ComponentProps = {
+          options: opts.slice(1).join(', ').trim() || undefined,
+        };
+        addPlacedComponent(doc, registry, tikzToDefId, id, tikzName, position, undefined, props);
+        return true;
+      }
+
+      const bipoleMatch = body.match(/^(\([-\d.]+\s*,\s*[-\d.]+\))\s+to\[([^\]]+)\]\s+(\([^)]+\))$/);
+      if (bipoleMatch) {
+        const start = parseCoord(bipoleMatch[1]);
+        const end   = parseCoord(bipoleMatch[3]);
+        if (!start || !end) return true;
+        const rawOpts = splitOptions(bipoleMatch[2]);
+        const tikzName = rawOpts[0]?.trim();
+        const defId = tikzToDefId.get(tikzName) ?? tikzName;
+        const rest = rawOpts.slice(1);
+        const kv = extractKV(rest);
+        const props: ComponentProps = {
+          ...parseTerminals(rest),
+          label:   kv['l'] ?? undefined,
+          voltage: kv['v'] ?? undefined,
+          current: kv['i'] ?? undefined,
+        };
+        const comp: BipoleInstance = { id, defId, type: 'bipole', start, end, props };
+        doc.addComponent(comp);
+        return true;
+      }
+
+      const split = splitCompoundDrawBody(body);
+      if (!split) return false;
+      split.forEach((part, index) => {
+        parseSingleStatement(`\\draw ${part}`, `${id}:${index}`);
+      });
+      return true;
+    };
+
+    parseSingleStatement(stmt, `line:${lineIndex}`);
   }
 }
 
@@ -418,6 +466,6 @@ export function parseCircuiTikZ(
  * Returns -1 if the id is not in that format.
  */
 export function lineIndexFromId(id: string): number {
-  const m = id.match(/^line:(\d+)$/);
+  const m = id.match(/^line:(\d+)(?::\d+)?$/);
   return m ? parseInt(m[1], 10) : -1;
 }
