@@ -2,6 +2,7 @@ import type { GridPoint } from '../types';
 import type { GhostRenderer } from '../canvas/GhostRenderer';
 import type { HitTester } from '../canvas/HitTester';
 import type { ComponentDef } from '../types';
+import type { ClipboardPayload } from './SelectionClipboard';
 
 export interface ToolContext {
   ghost: GhostRenderer;
@@ -13,6 +14,7 @@ export interface ToolContext {
   appendLine: (line: string) => void;
   /** Delete model elements and their corresponding LaTeX source lines. */
   deleteElements: (ids: string[]) => void;
+  placeClipboard: (payload: ClipboardPayload, target: GridPoint) => void;
   undo: () => void;
 }
 

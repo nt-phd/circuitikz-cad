@@ -159,7 +159,24 @@ function parseDrawingStatement(body: string, drawOptions: string | undefined): D
   const textNodeMatch = body.match(/^node(?:\[[^\]]*\])?\s+at\s+(\([^)]+\))\s*\{([\s\S]*)\}$/);
   if (textNodeMatch) {
     const position = parseCoord(textNodeMatch[1]);
-    if (position) return { id: '', kind: 'text', position, props: { text: textNodeMatch[2] } };
+    const optionMatch = body.match(/^node(?:\[([^\]]*)\])?\s+at\s+\([^)]+\)\s*\{[\s\S]*\}$/);
+    const optionParts = optionMatch?.[1] ? splitOptions(optionMatch[1]) : [];
+    const kv = extractKV(optionParts);
+    const filtered = optionParts.filter((part) => !/^(anchor|rotate|scale)\s*=/.test(part.trim()));
+    if (position) {
+      return {
+        id: '',
+        kind: 'text',
+        position,
+        props: {
+          anchor: kv.anchor,
+          options: filtered.join(', ').trim() || undefined,
+          rotation: kv.rotate,
+          scale: kv.scale,
+          text: textNodeMatch[2],
+        },
+      };
+    }
   }
 
   return null;
@@ -204,6 +221,22 @@ function splitOptions(s: string): string[] {
   }
   if (cur.trim()) parts.push(cur.trim());
   return parts;
+}
+
+function extractRotationOption(opts: string[]): { filtered: string[]; rotation: 0 | 90 | 180 | 270 } {
+  let rotation: 0 | 90 | 180 | 270 = 0;
+  const filtered = opts.filter((opt) => {
+    const match = opt.trim().match(/^rotate\s*=\s*(-?\d+)$/);
+    if (!match) return true;
+    const parsed = Number.parseInt(match[1], 10);
+    const normalized = ((parsed % 360) + 360) % 360;
+    if (normalized === 0 || normalized === 90 || normalized === 180 || normalized === 270) {
+      rotation = normalized as 0 | 90 | 180 | 270;
+      return false;
+    }
+    return true;
+  });
+  return { filtered, rotation };
 }
 
 function addPlacedComponent(
@@ -285,7 +318,8 @@ export function parseCircuiTikZ(
       const position = parseCoord(nodeStmtMatch[3]);
       const opts = splitOptions(nodeStmtMatch[1]);
       const tikzName = opts[0]?.trim();
-      const extraOptions = opts.slice(1).join(', ').trim() || undefined;
+      const { filtered, rotation } = extractRotationOption(opts.slice(1));
+      const extraOptions = filtered.join(', ').trim() || undefined;
       const textAnchorOpts = nodeStmtMatch[4] ? extractKV(splitOptions(nodeStmtMatch[4])) : {};
       const textTarget = nodeStmtMatch[5]?.trim();
       const text = nodeStmtMatch[6];
@@ -294,7 +328,11 @@ export function parseCircuiTikZ(
         text: textTarget?.endsWith('.text') ? text : undefined,
         textAnchor: textTarget?.endsWith('.text') ? (textAnchorOpts.anchor ?? 'center') : undefined,
       };
-      if (position && tikzName) addPlacedComponent(doc, registry, tikzToDefId, id, tikzName, position, nodeStmtMatch[2]?.trim(), props);
+      if (position && tikzName) {
+        addPlacedComponent(doc, registry, tikzToDefId, id, tikzName, position, nodeStmtMatch[2]?.trim(), props);
+        const comp = doc.getComponent(id);
+        if (comp && comp.type !== 'bipole') comp.rotation = rotation;
+      }
       continue;
     }
 

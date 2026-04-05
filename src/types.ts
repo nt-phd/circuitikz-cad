@@ -144,7 +144,10 @@ export type WireRoutingMode = 'auto' | '--' | '|-' | '-|';
 export type DrawingKind = 'line' | 'arrow' | 'text' | 'rectangle' | 'circle' | 'bezier';
 
 export interface DrawingProps {
+  anchor?: string;
   options?: string;
+  rotation?: string;
+  scale?: string;
   text?: string;
 }
 
@@ -224,7 +227,8 @@ export type ToolType =
   | 'draw-text'
   | 'draw-rectangle'
   | 'draw-circle'
-  | 'draw-bezier';
+  | 'draw-bezier'
+  | 'paste-selection';
 
 // ============================================================
 // EVENTS

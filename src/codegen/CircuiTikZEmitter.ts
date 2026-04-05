@@ -4,6 +4,7 @@ import type { ComponentRegistry } from '../definitions/ComponentRegistry';
 import { formatCoord } from './CoordFormatter';
 import { formatLabel } from './LabelFormatter';
 import { emitWirePath } from './WirePathEmitter';
+import { emitPlacedNodeLine } from './NodeEmitter';
 
 /**
  * Emits the tikzpicture body (without \begin/\end) from a CircuitDocument.
@@ -75,15 +76,7 @@ export class CircuiTikZEmitter {
   }
 
   private emitPlacedNode(comp: MonopoleInstance | NodeInstance, tikzName: string): string {
-    const optionParts = [tikzName];
-    if (comp.props.options) optionParts.push(comp.props.options);
-    const nodeName = comp.nodeName ? `(${comp.nodeName})` : '';
-    const base = `\\node[${optionParts.join(', ')}]${nodeName} at ${formatCoord(comp.position)} {};`;
-    if (comp.nodeName && comp.props.text) {
-      const anchor = comp.props.textAnchor || 'center';
-      return `${base} node[anchor=${anchor}] at (${comp.nodeName}.text){${comp.props.text}};`;
-    }
-    return base;
+    return emitPlacedNodeLine(comp, tikzName) ?? '';
   }
 
   private emitDrawing(drawing: DrawingInstance): string {
@@ -93,7 +86,7 @@ export class CircuiTikZEmitter {
       case 'arrow':
         return `\\draw[${drawing.props.options || '->'}] ${formatCoord(drawing.start)} -- ${formatCoord(drawing.end)};`;
       case 'text':
-        return `\\node at ${formatCoord(drawing.position)} {${drawing.props.text ?? 'Text'}};`;
+        return this.emitTextNode(drawing);
       case 'rectangle':
         return `\\draw[${drawing.props.options || 'thin'}] ${formatCoord(drawing.start)} rectangle ${formatCoord(drawing.end)};`;
       case 'circle':
@@ -101,6 +94,17 @@ export class CircuiTikZEmitter {
       case 'bezier':
         return `\\draw[${drawing.props.options || 'thin'}] ${formatCoord(drawing.start)} .. controls ${formatCoord(drawing.control1)} and ${formatCoord(drawing.control2)} .. ${formatCoord(drawing.end)};`;
     }
+  }
+
+  private emitTextNode(drawing: DrawingInstance): string {
+    const optionParts: string[] = [];
+    if (drawing.kind !== 'text') return '';
+    if (drawing.props.anchor) optionParts.push(`anchor=${drawing.props.anchor}`);
+    if (drawing.props.rotation) optionParts.push(`rotate=${drawing.props.rotation}`);
+    if (drawing.props.scale) optionParts.push(`scale=${drawing.props.scale}`);
+    if (drawing.props.options) optionParts.push(drawing.props.options);
+    const options = optionParts.length > 0 ? `[${optionParts.join(', ')}]` : '';
+    return `\\node${options} at ${formatCoord(drawing.position)} {${drawing.props.text ?? 'Text'}};`;
   }
 
   private terminalString(start?: TerminalMark, end?: TerminalMark): string {

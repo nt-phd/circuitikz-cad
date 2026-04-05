@@ -12,6 +12,7 @@ import { scaleState } from './ScaleState';
 import { createGroup, createLine, createRect } from '../utils/svg';
 import { getBipoleBodyMetrics, getPlacedComponentMetrics } from './ComponentGeometry';
 import { componentProbeService, type ComponentRenderProbe } from './ComponentProbeService';
+import type { ClipboardEntry } from '../tools/SelectionClipboard';
 
 const OVERLAY_STROKE_WIDTH = 0.5;
 const SELECTION_LINE_OPACITY = 1;
@@ -172,6 +173,35 @@ export class GhostRenderer {
       if (ghost) g.appendChild(ghost);
     } else {
       g.appendChild(this.crossAt(position.x * this.gs, position.y * this.gs, this.gs * OVERLAY_CROSS_SIZE, GHOST_LINE_OPACITY));
+    }
+    return g;
+  }
+
+  buildClipboardGhost(entries: ClipboardEntry[]): SVGGElement {
+    this.setLatexGhostPreview(null);
+    const g = createGroup('ghost-clipboard');
+    for (const entry of entries) {
+      if (entry.kind === 'component') {
+        const def = this.registry.get(entry.item.defId);
+        if (!def) continue;
+        if (entry.item.type === 'bipole') {
+          g.appendChild(this.buildBipoleSelection(entry.item, def));
+        } else {
+          g.appendChild(this.buildPlacedComponentSelection(
+            entry.item.position.x,
+            entry.item.position.y,
+            def,
+            entry.item.rotation,
+            false,
+          ));
+        }
+        continue;
+      }
+      if (entry.kind === 'wire') {
+        g.appendChild(this.buildWireSelection(entry.item));
+        continue;
+      }
+      g.appendChild(this.buildDrawingSelection(entry.item));
     }
     return g;
   }

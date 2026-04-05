@@ -7,14 +7,18 @@ import { PlaceMonopoleTool } from './PlaceMonopoleTool';
 import { WireTool } from './WireTool';
 import { DeleteTool } from './DeleteTool';
 import { DrawShapeTool } from './DrawShapeTool';
+import { PasteSelectionTool } from './PasteSelectionTool';
 import type { LatexCanvas } from '../canvas/LatexCanvas';
 import type { SelectionState } from '../model/SelectionState';
+import type { ClipboardPayload } from './SelectionClipboard';
+import { copySelectionToClipboard } from './SelectionClipboard';
 
 export class ToolManager {
   private currentTool: BaseTool;
   private _currentType: ToolType = 'select';
   private _currentDefId?: string;
   private _wireRoutingMode: WireRoutingMode = 'auto';
+  private clipboard: ClipboardPayload | null = null;
 
   constructor(
     private ctx: ToolContext,
@@ -88,6 +92,21 @@ export class ToolManager {
         this.currentTool = new DrawShapeTool(this.ctx, 'bezier');
         overlay.style.cursor = 'crosshair';
         break;
+      case 'paste-selection':
+        if (!this.clipboard) {
+          this.currentTool = new SelectTool(this.ctx, this.selection);
+          this._currentType = 'select';
+          overlay.style.cursor = 'default';
+          break;
+        }
+        this.currentTool = new PasteSelectionTool(
+          this.ctx,
+          this.clipboard,
+          () => this.setTool('select'),
+          () => this.setTool('select'),
+        );
+        overlay.style.cursor = 'crosshair';
+        break;
     }
 
     this.currentTool.activate();
@@ -139,6 +158,46 @@ export class ToolManager {
         e.preventDefault();
         this.ctx.undo();
         return;
+      }
+
+      if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.key.toLowerCase() === 'a') {
+        e.preventDefault();
+        const doc = this.ctx.getDocument();
+        const selectedIds = [
+          ...doc.components.map((component) => component.id),
+          ...doc.wires.map((wire) => wire.id),
+          ...doc.drawings.map((drawing) => drawing.id),
+        ];
+        this.selection.setSelectedIds(selectedIds);
+        this.emitEvent({ type: 'selection-changed', selectedIds, source: 'canvas' });
+        return;
+      }
+
+      if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.key.toLowerCase() === 'c') {
+        const selectedIds = this.selection.getSelectedIds();
+        if (selectedIds.length > 0) {
+          e.preventDefault();
+          this.clipboard = copySelectionToClipboard(this.ctx.getDocument(), selectedIds);
+          return;
+        }
+      }
+
+      if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.key.toLowerCase() === 'x') {
+        const selectedIds = this.selection.getSelectedIds();
+        if (selectedIds.length > 0) {
+          e.preventDefault();
+          this.clipboard = copySelectionToClipboard(this.ctx.getDocument(), selectedIds);
+          this.ctx.deleteElements(selectedIds);
+          return;
+        }
+      }
+
+      if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.key.toLowerCase() === 'v') {
+        if (this.clipboard) {
+          e.preventDefault();
+          this.setTool('paste-selection');
+          return;
+        }
       }
 
       if (e.key === 'Delete' || e.key === 'Backspace') {

@@ -33,6 +33,8 @@ import {
 import SearchRoundedIcon from '@mui/icons-material/SearchRounded';
 import DataObjectRoundedIcon from '@mui/icons-material/DataObjectRounded';
 import DownloadRoundedIcon from '@mui/icons-material/DownloadRounded';
+import DescriptionRoundedIcon from '@mui/icons-material/DescriptionRounded';
+import UploadFileRoundedIcon from '@mui/icons-material/UploadFileRounded';
 import ExpandMoreRoundedIcon from '@mui/icons-material/ExpandMoreRounded';
 import RouteRoundedIcon from '@mui/icons-material/RouteRounded';
 import RouteSharpIcon from '@mui/icons-material/RouteSharp';
@@ -53,6 +55,7 @@ import ArrowRightAltRoundedIcon from '@mui/icons-material/ArrowRightAltRounded';
 import TextFieldsRoundedIcon from '@mui/icons-material/TextFieldsRounded';
 import CropSquareRoundedIcon from '@mui/icons-material/CropSquareRounded';
 import CircleOutlinedIcon from '@mui/icons-material/CircleOutlined';
+import FlipRoundedIcon from '@mui/icons-material/FlipRounded';
 import type { ImperativeAppHandle } from './initImperativeApp';
 import { initImperativeApp } from './initImperativeApp';
 import { lineIndexFromId } from './codegen/CircuiTikZParser';
@@ -110,6 +113,21 @@ function formatGridCoord(value: number, pitch: number): string {
   const snapped = Math.round(value / pitch) * pitch;
   const decimals = Number.isInteger(pitch) ? 0 : (String(pitch).split('.')[1]?.length ?? 0);
   return snapped.toFixed(decimals).replace(/\.0+$/, '').replace(/(\.\d*?)0+$/, '$1');
+}
+
+function splitNodeOptions(options: string): string[] {
+  return options.split(',').map((part) => part.trim()).filter(Boolean);
+}
+
+function hasNodeScaleOption(options: string, axis: 'x' | 'y'): boolean {
+  return splitNodeOptions(options).some((part) => part === `${axis}scale=-1`);
+}
+
+function toggleNodeScaleOption(options: string, axis: 'x' | 'y'): string {
+  const key = `${axis}scale`;
+  const nextParts = splitNodeOptions(options).filter((part) => !part.startsWith(`${key}=`));
+  if (!hasNodeScaleOption(options, axis)) nextParts.push(`${key}=-1`);
+  return nextParts.join(', ');
 }
 
 function namespaceInlineSvg(markup: string, prefix: string): string {
@@ -251,7 +269,9 @@ function ToolbarView({
   onWireRoutingModeChange,
   pinSnapEnabled,
   onClear,
+  onDownloadTex,
   onFitToScreen,
+  onOpenTexUpload,
   onSelectTool,
   onUndo,
   onZoomIn,
@@ -267,7 +287,9 @@ function ToolbarView({
   onWireRoutingModeChange: (mode: WireRoutingMode) => void;
   pinSnapEnabled: boolean;
   onClear: () => void;
+  onDownloadTex: () => void;
   onFitToScreen: () => void;
+  onOpenTexUpload: () => void;
   onSelectTool: (tool: ToolType) => void;
   onUndo: () => void;
   onZoomIn: () => void;
@@ -465,6 +487,16 @@ function ToolbarView({
         <Tooltip title="Undo last change">
           <Button aria-label="Undo" onClick={onUndo} size="small" sx={toolbarButtonSx} variant="outlined">
             <UndoRoundedIcon fontSize="small" />
+          </Button>
+        </Tooltip>
+        <Tooltip title="Download TEX">
+          <Button aria-label="Download TEX" onClick={onDownloadTex} size="small" sx={toolbarButtonSx} variant="outlined">
+            <DescriptionRoundedIcon fontSize="small" />
+          </Button>
+        </Tooltip>
+        <Tooltip title="Upload TEX">
+          <Button aria-label="Upload TEX" onClick={onOpenTexUpload} size="small" sx={toolbarButtonSx} variant="outlined">
+            <UploadFileRoundedIcon fontSize="small" />
           </Button>
         </Tooltip>
         <Tooltip title="Show grid">
@@ -924,9 +956,14 @@ function PropertiesView({
     voltage: comp?.props.voltage ?? '',
   });
   const [draftDrawingProps, setDraftDrawingProps] = useState({
+    anchor: drawing?.props.anchor ?? 'center',
     options: drawing?.props.options ?? '',
+    rotation: drawing?.props.rotation ?? '0',
+    scale: drawing?.props.scale ?? '1',
     text: drawing?.props.text ?? '',
   });
+  const hasFlipX = hasNodeScaleOption(draftComponentProps.options, 'x');
+  const hasFlipY = hasNodeScaleOption(draftComponentProps.options, 'y');
 
   useEffect(() => {
     setDraftPreamble(preamble);
@@ -946,10 +983,13 @@ function PropertiesView({
 
   useEffect(() => {
     setDraftDrawingProps({
+      anchor: drawing?.props.anchor ?? 'center',
       options: drawing?.props.options ?? '',
+      rotation: drawing?.props.rotation ?? '0',
+      scale: drawing?.props.scale ?? '1',
       text: drawing?.props.text ?? '',
     });
-  }, [drawing?.id, drawing?.props.options, drawing?.props.text, documentVersion]);
+  }, [drawing?.id, drawing?.props.anchor, drawing?.props.options, drawing?.props.rotation, drawing?.props.scale, drawing?.props.text, documentVersion]);
 
   const updateComponentProps = (props: Record<string, string | undefined>) => {
     if (!selectionId) return;
@@ -980,6 +1020,13 @@ function PropertiesView({
     const currentValue = comp.props[key] ?? undefined;
     if (nextValue === currentValue) return;
     updateComponentProps({ [key]: nextValue });
+  };
+
+  const toggleNodeFlip = (axis: 'x' | 'y') => {
+    if (!comp || comp.type === 'bipole') return;
+    const options = toggleNodeScaleOption(draftComponentProps.options, axis);
+    setDraftComponentProps((prev) => ({ ...prev, options }));
+    updateComponentProps({ options: options || undefined });
   };
 
   const commitDrawingProp = (key: keyof typeof draftDrawingProps) => {
@@ -1046,15 +1093,69 @@ function PropertiesView({
       {selectionCount === 1 && drawing ? (
         <>
           {drawing.kind === 'text' ? (
-            <TextField
-              fullWidth
-              label="Text"
-              onBlur={() => commitDrawingProp('text')}
-              onChange={(event) => setDraftDrawingProps((prev) => ({ ...prev, text: event.target.value }))}
-              onKeyDown={stopShortcutPropagation}
-              size="small"
-              value={draftDrawingProps.text}
-            />
+            <>
+              <TextField
+                fullWidth
+                label="Text"
+                onBlur={() => commitDrawingProp('text')}
+                onChange={(event) => setDraftDrawingProps((prev) => ({ ...prev, text: event.target.value }))}
+                onKeyDown={stopShortcutPropagation}
+                size="small"
+                value={draftDrawingProps.text}
+              />
+              <FormControl fullWidth size="small">
+                <Select
+                  displayEmpty
+                  onChange={(event) => {
+                    const value = event.target.value;
+                    setDraftDrawingProps((prev) => ({ ...prev, anchor: value }));
+                    updateDrawingProps({ anchor: value || undefined });
+                  }}
+                  value={draftDrawingProps.anchor}
+                >
+                  <MenuItem value="center">Text anchor: center</MenuItem>
+                  <MenuItem value="north">Text anchor: north</MenuItem>
+                  <MenuItem value="south">Text anchor: south</MenuItem>
+                  <MenuItem value="east">Text anchor: east</MenuItem>
+                  <MenuItem value="west">Text anchor: west</MenuItem>
+                </Select>
+              </FormControl>
+              <Stack alignItems="center" direction="row" spacing={1} sx={{ alignSelf: 'flex-start' }}>
+                <ToggleButtonGroup
+                  exclusive
+                  onChange={(_event, value) => {
+                    if (value == null) return;
+                    setDraftDrawingProps((prev) => ({ ...prev, rotation: String(value) }));
+                    updateDrawingProps({ rotation: String(value) });
+                  }}
+                  size="small"
+                  value={Number(draftDrawingProps.rotation)}
+                >
+                  {[0, 90, 180, 270].map((rotation) => (
+                    <ToggleButton key={rotation} value={rotation}>
+                      {rotation}°
+                    </ToggleButton>
+                  ))}
+                </ToggleButtonGroup>
+                <FormControl size="small" sx={{ minWidth: 84 }}>
+                  <Select
+                    displayEmpty
+                    onChange={(event) => {
+                      const value = event.target.value;
+                      setDraftDrawingProps((prev) => ({ ...prev, scale: value }));
+                      updateDrawingProps({ scale: value || undefined });
+                    }}
+                    value={draftDrawingProps.scale}
+                  >
+                    <MenuItem value="0.5">Scale: 0.5</MenuItem>
+                    <MenuItem value="0.75">Scale: 0.75</MenuItem>
+                    <MenuItem value="1">Scale: 1</MenuItem>
+                    <MenuItem value="1.5">Scale: 1.5</MenuItem>
+                    <MenuItem value="2">Scale: 2</MenuItem>
+                  </Select>
+                </FormControl>
+              </Stack>
+            </>
           ) : null}
           {drawing.kind === 'circle' ? (
             <TextField
@@ -1142,6 +1243,36 @@ function PropertiesView({
 
           {comp.type !== 'bipole' ? (
             <>
+              <Stack alignItems="center" direction="row" spacing={1} sx={{ alignSelf: 'flex-start' }}>
+                <ToggleButtonGroup
+                  exclusive
+                  onChange={updateRotation}
+                  size="small"
+                  value={comp.rotation}
+                >
+                  {[0, 90, 180, 270].map((rotation) => (
+                    <ToggleButton key={rotation} value={rotation}>
+                      {rotation}°
+                    </ToggleButton>
+                  ))}
+                </ToggleButtonGroup>
+                <ToggleButtonGroup size="small">
+                  <ToggleButton
+                    onClick={() => toggleNodeFlip('x')}
+                    selected={hasFlipX}
+                    value="flip-x"
+                  >
+                    <FlipRoundedIcon fontSize="small" />
+                  </ToggleButton>
+                  <ToggleButton
+                    onClick={() => toggleNodeFlip('y')}
+                    selected={hasFlipY}
+                    value="flip-y"
+                  >
+                    <FlipRoundedIcon fontSize="small" sx={{ transform: 'rotate(90deg)' }} />
+                  </ToggleButton>
+                </ToggleButtonGroup>
+              </Stack>
               <TextField
                 fullWidth
                 label="Node options"
@@ -1179,19 +1310,6 @@ function PropertiesView({
                   <MenuItem value="west">Text anchor: west</MenuItem>
                 </Select>
               </FormControl>
-              <ToggleButtonGroup
-                exclusive
-                onChange={updateRotation}
-                size="small"
-                sx={{ alignSelf: 'flex-start' }}
-                value={comp.rotation}
-              >
-                {[0, 90, 180, 270].map((rotation) => (
-                  <ToggleButton key={rotation} value={rotation}>
-                    {rotation}°
-                  </ToggleButton>
-                ))}
-              </ToggleButtonGroup>
             </>
           ) : null}
         </>
@@ -1213,6 +1331,7 @@ function useAppState(handle: ImperativeAppHandle | null) {
   const [pinSnapEnabled, setPinSnapEnabled] = useState(true);
   const [wireRoutingMode, setWireRoutingMode] = useState<WireRoutingMode>('auto');
   const documentTextareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const texUploadInputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
     if (!handle) return;
@@ -1337,6 +1456,37 @@ function useAppState(handle: ImperativeAppHandle | null) {
     window.setTimeout(() => URL.revokeObjectURL(url), 0);
   };
 
+  const onDownloadTex = () => {
+    if (!handle) return;
+    const tex = handle.getFullLatexSource();
+    const blob = new Blob([tex], { type: 'text/x-tex;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = 'circuitikz-diagram.tex';
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    window.setTimeout(() => URL.revokeObjectURL(url), 0);
+  };
+
+  const onOpenTexUpload = () => {
+    texUploadInputRef.current?.click();
+  };
+
+  const onUploadTex = async (event: ChangeEvent<HTMLInputElement>) => {
+    if (!handle) return;
+    const file = event.target.files?.[0];
+    if (!file) return;
+    const source = await file.text();
+    handle.loadFullLatexSource(source);
+    setSelectedIds(handle.getSelectedIds());
+    setPreamble(handle.getPreamble());
+    setBody(handle.getBody());
+    setDocumentVersion((version) => version + 1);
+    event.target.value = '';
+  };
+
   const onSelectTool = (tool: ToolType, defId?: string) => {
     setCurrentTool(tool);
     setCurrentDefId(defId);
@@ -1395,9 +1545,11 @@ function useAppState(handle: ImperativeAppHandle | null) {
     gridPitch,
     onClear,
     onCopy,
+    onDownloadTex,
     onDownloadSvg,
     onFitToScreen,
     onGridPitchChange,
+    onOpenTexUpload,
     onSelectTool,
     onToggleGridVisible,
     onTogglePinSnap,
@@ -1411,6 +1563,8 @@ function useAppState(handle: ImperativeAppHandle | null) {
     setBody,
     setPreamble,
     stopShortcutPropagation,
+    texUploadInputRef,
+    onUploadTex,
     wireRoutingMode,
   };
 }
@@ -1585,7 +1739,9 @@ function AppShell({
         currentTool={appState.currentTool}
         gridVisible={appState.gridVisible}
         onClear={appState.onClear}
+        onDownloadTex={appState.onDownloadTex}
         onFitToScreen={appState.onFitToScreen}
+        onOpenTexUpload={appState.onOpenTexUpload}
         onSelectTool={appState.onSelectTool}
         onToggleGridVisible={appState.onToggleGridVisible}
         onTogglePinSnap={appState.onTogglePinSnap}
@@ -1685,6 +1841,13 @@ function AppShell({
         gridPitch={appState.gridPitch}
         handle={handle}
         pinSnapEnabled={appState.pinSnapEnabled}
+      />
+      <input
+        accept=".tex,text/x-tex,text/plain"
+        hidden
+        onChange={appState.onUploadTex}
+        ref={appState.texUploadInputRef}
+        type="file"
       />
     </>
   );

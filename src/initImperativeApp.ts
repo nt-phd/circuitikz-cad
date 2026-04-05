@@ -15,9 +15,12 @@ import type { ComponentRenderProbe } from './canvas/ComponentProbeService';
 import { formatCoord } from './codegen/CoordFormatter';
 import { formatLabel } from './codegen/LabelFormatter';
 import { emitWirePath } from './codegen/WirePathEmitter';
+import { emitPlacedNodeLine } from './codegen/NodeEmitter';
 import { DEFAULT_BODY } from './model/LatexDocument';
 import type { ComponentInstance, DrawingInstance, WireInstance, TerminalMark, ToolType, Rotation, ComponentProps, WireRoutingMode } from './types';
 import type { ToolContext } from './tools/BaseTool';
+import type { ClipboardPayload, ClipboardEntry } from './tools/SelectionClipboard';
+import { materializeClipboardAt } from './tools/SelectionClipboard';
 
 let initialized = false;
 let initPromise: Promise<ImperativeAppHandle> | null = null;
@@ -27,6 +30,16 @@ function appendLineToBody(body: string, line: string): string {
   const idx = body.lastIndexOf(marker);
   if (idx === -1) return body + '\n' + line;
   return body.slice(0, idx) + '  ' + line + '\n' + body.slice(idx);
+}
+
+function appendLinesToBody(body: string, linesToAppend: string[]): { body: string; startLineIndex: number } {
+  const marker = '\\end{tikzpicture}';
+  const lines = body.split('\n');
+  const markerIndex = lines.findIndex((line) => line.includes(marker));
+  const insertIndex = markerIndex >= 0 ? markerIndex : lines.length;
+  const indented = linesToAppend.map((line) => `  ${line}`);
+  lines.splice(insertIndex, 0, ...indented);
+  return { body: lines.join('\n'), startLineIndex: insertIndex };
 }
 
 function terminalString(start?: TerminalMark, end?: TerminalMark): string {
@@ -48,24 +61,10 @@ function emitComponentLine(comp: ComponentInstance): string | null {
     return `\\draw ${formatCoord(comp.start)} to[${opts.join(', ')}] ${formatCoord(comp.end)};`;
   }
   if (comp.type === 'monopole') {
-    const nodeName = comp.nodeName ? `(${comp.nodeName})` : '';
-    const options = comp.props.options ? `, ${comp.props.options}` : '';
-    const base = `\\node[${tikzName}${options}]${nodeName} at ${formatCoord(comp.position)} {};`;
-    if (comp.nodeName && comp.props.text) {
-      const anchor = comp.props.textAnchor || 'center';
-      return `${base} node[anchor=${anchor}] at (${comp.nodeName}.text){${comp.props.text}};`;
-    }
-    return base;
+    return emitPlacedNodeLine(comp, tikzName);
   }
   if (comp.type === 'node') {
-    const nodeName = comp.nodeName ? `(${comp.nodeName})` : '';
-    const options = comp.props.options ? `, ${comp.props.options}` : '';
-    const base = `\\node[${tikzName}${options}]${nodeName} at ${formatCoord(comp.position)} {};`;
-    if (comp.nodeName && comp.props.text) {
-      const anchor = comp.props.textAnchor || 'center';
-      return `${base} node[anchor=${anchor}] at (${comp.nodeName}.text){${comp.props.text}};`;
-    }
-    return base;
+    return emitPlacedNodeLine(comp, tikzName);
   }
   return null;
 }
@@ -82,7 +81,15 @@ function emitDrawingLine(drawing: DrawingInstance): string {
     case 'arrow':
       return `\\draw[${drawing.props.options || '->'}] ${formatCoord(drawing.start)} -- ${formatCoord(drawing.end)};`;
     case 'text':
-      return `\\node at ${formatCoord(drawing.position)} {${drawing.props.text ?? 'Text'}};`;
+      {
+        const optionParts: string[] = [];
+        if (drawing.props.anchor) optionParts.push(`anchor=${drawing.props.anchor}`);
+        if (drawing.props.rotation) optionParts.push(`rotate=${drawing.props.rotation}`);
+        if (drawing.props.scale) optionParts.push(`scale=${drawing.props.scale}`);
+        if (drawing.props.options) optionParts.push(drawing.props.options);
+        const options = optionParts.length > 0 ? `[${optionParts.join(', ')}]` : '';
+        return `\\node${options} at ${formatCoord(drawing.position)} {${drawing.props.text ?? 'Text'}};`;
+      }
     case 'rectangle':
       return `\\draw[${drawing.props.options || 'thin'}] ${formatCoord(drawing.start)} rectangle ${formatCoord(drawing.end)};`;
     case 'circle':
@@ -90,6 +97,12 @@ function emitDrawingLine(drawing: DrawingInstance): string {
     case 'bezier':
       return `\\draw[${drawing.props.options || 'thin'}] ${formatCoord(drawing.start)} .. controls ${formatCoord(drawing.control1)} and ${formatCoord(drawing.control2)} .. ${formatCoord(drawing.end)};`;
   }
+}
+
+function emitClipboardEntry(entry: ClipboardEntry): string | null {
+  if (entry.kind === 'component') return emitComponentLine(entry.item);
+  if (entry.kind === 'wire') return emitWireLine(entry.item);
+  return emitDrawingLine(entry.item);
 }
 
 function updateBodyLinePreservingStructure(body: string, lineIndex: number, replacement: string, kind: 'component' | 'wire'): string {
@@ -123,6 +136,7 @@ export interface ImperativeAppHandle {
   getPreamble: () => string;
   getBody: () => string;
   getFullLatexSource: () => string;
+  loadFullLatexSource: (source: string) => void;
   getRenderedSvg: () => string | null;
   getLibraryPreviewProbe: (defId: string, onResolved: () => void) => ComponentRenderProbe | null;
   warmLibraryPreviewProbes: (onResolved: () => void) => void;
@@ -252,6 +266,26 @@ async function createImperativeApp(canvasContainer: HTMLElement): Promise<Impera
       canvas.refresh();
       canvas.scheduleRender();
     },
+    placeClipboard: (payload, target) => {
+      pushUndoSnapshot();
+      const entries = materializeClipboardAt(payload, target, () => circuitDoc.nextNodeName());
+      const lines = entries
+        .map((entry) => emitClipboardEntry(entry))
+        .filter((line): line is string => Boolean(line));
+      if (lines.length === 0) return;
+      const appended = appendLinesToBody(latexDoc.body, lines);
+      latexDoc.body = appended.body;
+      syncTikzScale();
+      componentProbeService.invalidate();
+      parseCircuiTikZ(latexDoc.body, circuitDoc, registry);
+      const selectedIds = lines.map((_, index) => `line:${appended.startLineIndex + index}`);
+      selection.setSelectedIds(selectedIds);
+      eventBus.emit({ type: 'selection-changed', selectedIds, source: 'canvas' });
+      eventBus.emit({ type: 'body-changed' });
+      eventBus.emit({ type: 'user-edited-latex' });
+      canvas.refresh();
+      canvas.scheduleRender();
+    },
     undo: () => {
       const previous = undoStack.pop();
       if (!previous) return;
@@ -336,6 +370,11 @@ async function createImperativeApp(canvasContainer: HTMLElement): Promise<Impera
     getPreamble: () => latexDoc.preamble,
     getBody: () => latexDoc.body,
     getFullLatexSource: () => latexDoc.toFullSource(),
+    loadFullLatexSource: (source) => {
+      pushUndoSnapshot();
+      applyFullSource(source);
+      eventBus.emit({ type: 'user-edited-latex' });
+    },
     getRenderedSvg: () => canvas.getRenderedSvg(),
     getLibraryPreviewProbe: (defId, onResolved) => {
       const def = registry.get(defId);
