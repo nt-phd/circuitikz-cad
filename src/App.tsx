@@ -3,8 +3,8 @@ import type {
   ChangeEvent,
   KeyboardEvent as ReactKeyboardEvent,
   MouseEvent as ReactMouseEvent,
+  MutableRefObject,
   ReactNode,
-  RefObject,
   SyntheticEvent,
   WheelEvent as ReactWheelEvent,
 } from 'react';
@@ -56,6 +56,11 @@ import TextFieldsRoundedIcon from '@mui/icons-material/TextFieldsRounded';
 import CropSquareRoundedIcon from '@mui/icons-material/CropSquareRounded';
 import CircleOutlinedIcon from '@mui/icons-material/CircleOutlined';
 import FlipRoundedIcon from '@mui/icons-material/FlipRounded';
+import CodeMirror from '@uiw/react-codemirror';
+import type { EditorView } from '@codemirror/view';
+import { lineNumbers } from '@codemirror/view';
+import { StreamLanguage } from '@codemirror/language';
+import { stex } from '@codemirror/legacy-modes/mode/stex';
 import type { ImperativeAppHandle } from './initImperativeApp';
 import { initImperativeApp } from './initImperativeApp';
 import { lineIndexFromId } from './codegen/CircuiTikZParser';
@@ -129,6 +134,8 @@ function toggleNodeScaleOption(options: string, axis: 'x' | 'y'): string {
   if (!hasNodeScaleOption(options, axis)) nextParts.push(`${key}=-1`);
   return nextParts.join(', ');
 }
+
+const latexLanguage = StreamLanguage.define(stex);
 
 function namespaceInlineSvg(markup: string, prefix: string): string {
   try {
@@ -1330,7 +1337,7 @@ function useAppState(handle: ImperativeAppHandle | null) {
   const [gridPitch, setGridPitch] = useState(0.5);
   const [pinSnapEnabled, setPinSnapEnabled] = useState(true);
   const [wireRoutingMode, setWireRoutingMode] = useState<WireRoutingMode>('auto');
-  const documentTextareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const documentEditorRef = useRef<EditorView | null>(null);
   const texUploadInputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
@@ -1383,17 +1390,14 @@ function useAppState(handle: ImperativeAppHandle | null) {
       if (nextSelectedIds.length !== 1) return;
       const lineIndex = lineIndexFromId(nextSelectedIds[0]);
       if (lineIndex < 0) return;
-      const textarea = documentTextareaRef.current;
-      if (!textarea) return;
-      const lines = textarea.value.split('\n');
-      if (lineIndex >= lines.length) return;
-      let start = 0;
-      for (let i = 0; i < lineIndex; i++) start += lines[i].length + 1;
-      const end = start + lines[lineIndex].length;
-      textarea.focus({ preventScroll: true });
-      textarea.setSelectionRange(start, end);
-      const lineHeight = parseFloat(getComputedStyle(textarea).lineHeight) || 18;
-      textarea.scrollTop = Math.max(0, lineIndex * lineHeight - textarea.clientHeight / 2);
+      const view = documentEditorRef.current;
+      if (!view) return;
+      const docLine = view.state.doc.line(Math.min(lineIndex + 1, view.state.doc.lines));
+      view.dispatch({
+        selection: { anchor: docLine.from, head: docLine.to },
+        scrollIntoView: true,
+      });
+      view.focus();
     });
     return unsub;
   }, [body, handle]);
@@ -1420,17 +1424,8 @@ function useAppState(handle: ImperativeAppHandle | null) {
     event.stopPropagation();
   };
 
-  const emitCaretSelection = (
-    event: ChangeEvent<HTMLInputElement | HTMLTextAreaElement> |
-    SyntheticEvent<HTMLInputElement | HTMLTextAreaElement>,
-  ) => {
+  const emitCaretSelection = (lineIndex: number) => {
     if (!handle) return;
-    const textarea = event.currentTarget;
-    if (typeof textarea.selectionStart !== 'number') return;
-    let lineIndex = 0;
-    for (let i = 0; i < textarea.selectionStart; i++) {
-      if (textarea.value.charCodeAt(i) === 10) lineIndex++;
-    }
     handle.selectSourceLine(lineIndex);
   };
 
@@ -1538,7 +1533,7 @@ function useAppState(handle: ImperativeAppHandle | null) {
     copyLabel,
     currentDefId,
     currentTool,
-    documentTextareaRef,
+    documentEditorRef,
     documentVersion,
     emitCaretSelection,
     gridVisible,
@@ -1571,59 +1566,97 @@ function useAppState(handle: ImperativeAppHandle | null) {
 
 function DocumentEditor({
   body,
-  documentTextareaRef,
+  documentEditorRef,
   emitCaretSelection,
   setBody,
-  stopShortcutPropagation,
 }: {
   body: string;
-  documentTextareaRef: RefObject<HTMLTextAreaElement | null>;
-  emitCaretSelection: (
-    e: ChangeEvent<HTMLInputElement | HTMLTextAreaElement> |
-    SyntheticEvent<HTMLInputElement | HTMLTextAreaElement>,
-  ) => void;
+  documentEditorRef: MutableRefObject<EditorView | null>;
+  emitCaretSelection: (lineIndex: number) => void;
   setBody: (value: string) => void;
-  stopShortcutPropagation: (e: ReactKeyboardEvent<HTMLElement>) => void;
 }) {
   return (
-    <Box id="document-panel" sx={{ display: 'flex', flex: 1, minHeight: 0, p: 2 }}>
+    <Box id="document-panel" sx={{ display: 'flex', flex: 1, minHeight: 0, minWidth: 0, p: 2 }}>
       <Box
-        component="textarea"
-        onChange={(event: ChangeEvent<HTMLTextAreaElement>) => {
-          setBody(event.target.value);
-          emitCaretSelection(event);
-        }}
-        onClick={emitCaretSelection}
-        onFocus={emitCaretSelection}
-        onKeyDown={stopShortcutPropagation}
-        onKeyUp={emitCaretSelection}
-        onMouseUp={emitCaretSelection}
-        onSelect={emitCaretSelection}
-        ref={documentTextareaRef}
-        spellCheck={false}
         sx={{
           backgroundColor: 'background.paper',
           border: 1,
           borderColor: 'divider',
           borderRadius: 1,
-          color: 'text.primary',
           flex: 1,
-          height: '100%',
-          fontFamily: '"Roboto Mono", monospace',
-          fontSize: 12,
-          lineHeight: 1.5,
           minHeight: 0,
-          outline: 'none',
-          p: 1.25,
-          resize: 'none',
-          whiteSpace: 'pre',
-          '&:focus': {
-            borderColor: 'primary.main',
-            boxShadow: (theme) => `0 0 0 1px ${theme.palette.primary.main}`,
+          minWidth: 0,
+          overflow: 'hidden',
+          '& > .cm-theme': {
+            height: '100%',
+            minWidth: 0,
+          },
+          '& .cm-editor': {
+            backgroundColor: 'background.paper',
+            color: 'text.primary',
+            fontFamily: '"Roboto Mono", monospace',
+            fontSize: 12,
+            height: '100%',
+            minWidth: 0,
+          },
+          '& .cm-focused': {
+            outline: 'none',
+          },
+          '& .cm-scroller': {
+            fontFamily: '"Roboto Mono", monospace',
+            height: '100%',
+            minWidth: 0,
+            lineHeight: 1.5,
+            overflowX: 'auto',
+            overflowY: 'auto',
+            width: '100%',
+          },
+          '& .cm-gutters': {
+            backgroundColor: 'background.paper',
+            borderRightColor: 'divider',
+          },
+          '& .cm-content': {
+            minHeight: '100%',
+            paddingBottom: '48px',
+            whiteSpace: 'pre',
+            width: 'max-content',
+            minWidth: '100%',
+          },
+          '& .cm-line': {
+            whiteSpace: 'pre',
+          },
+          '& .cm-activeLineGutter': {
+            backgroundColor: 'action.hover',
+          },
+          '& .cm-activeLine': {
+            backgroundColor: 'action.hover',
           },
         }}
-        value={body}
-      />
+      >
+        <CodeMirror
+          basicSetup={{
+            foldGutter: false,
+            highlightActiveLine: true,
+            highlightActiveLineGutter: true,
+          }}
+          extensions={[lineNumbers(), latexLanguage]}
+          height="100%"
+          onChange={(value) => {
+            setBody(value);
+          }}
+          onCreateEditor={(view) => {
+            documentEditorRef.current = view;
+          }}
+          onUpdate={(update) => {
+            if (update.selectionSet || update.docChanged || update.focusChanged) {
+              const lineIndex = update.state.doc.lineAt(update.state.selection.main.head).number - 1;
+              emitCaretSelection(lineIndex);
+            }
+          }}
+          style={{ height: '100%' }}
+          value={body}
+        />
+      </Box>
     </Box>
   );
 }
@@ -1827,10 +1860,9 @@ function AppShell({
         >
           <DocumentEditor
             body={appState.body}
-            documentTextareaRef={appState.documentTextareaRef}
+            documentEditorRef={appState.documentEditorRef}
             emitCaretSelection={appState.emitCaretSelection}
             setBody={appState.setBody}
-            stopShortcutPropagation={appState.stopShortcutPropagation}
           />
         </PanelSection>
       </Box>
