@@ -586,11 +586,6 @@ function LibraryView({
   }, [handle]);
 
   useEffect(() => {
-    if (!handle) return;
-    handle.warmLibraryPreviewProbes(() => forceRender((value) => value + 1));
-  }, [handle]);
-
-  useEffect(() => {
     let cancelled = false;
     fetch('/library-previews.json')
       .then((response) => response.ok ? response.json() : {})
@@ -1376,12 +1371,12 @@ function useAppState(handle: ImperativeAppHandle | null) {
       if (lineIndex < 0) return;
       const view = documentEditorRef.current;
       if (!view) return;
+      if (view.hasFocus) return;
       const docLine = view.state.doc.line(Math.min(lineIndex + 1, view.state.doc.lines));
       view.dispatch({
-        selection: { anchor: docLine.from, head: docLine.to },
+        selection: { anchor: docLine.from, head: docLine.from },
         scrollIntoView: true,
       });
-      view.focus();
     });
     return unsub;
   }, [body, handle]);
